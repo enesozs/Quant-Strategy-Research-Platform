@@ -1,0 +1,8 @@
+# Runtime dependencies of the web app (research engine + FastAPI), without the legacy
+# Streamlit interface or test tools. Used by the Docker image; versions match requirements.txt.
+numpy==2.5.1
+pandas==3.0.5
+scipy==1.18.1
+statsmodels==0.15.0
+yfinance==1.5.2
+fastapi[standard]==0.143.2

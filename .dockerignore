@@ -1,0 +1,14 @@
+# Send only what the image needs.
+.git
+.venv
+**/node_modules
+**/dist
+**/__pycache__
+**/.pytest_cache
+**/.ruff_cache
+tests
+docs
+assets
+*_app.py
+app.py
+run_optimization.py

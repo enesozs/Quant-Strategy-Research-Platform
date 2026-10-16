@@ -9,6 +9,7 @@ Guidance for coding agents working in this repository. The README describes the 
 - Web app: `make dev` (API :8020, UI :5190; ports avoid projects 05/06), `make serve` (built UI + API on :8020), `make test`.
 - Web checks: `cd web && npx tsc -b && npm run lint && npm test && npm run build`.
 - Legacy Streamlit app: `make streamlit`. Smoke test without a browser: `streamlit.testing.v1.AppTest.from_file("app.py")`, set `session_state["analysis_mode"]`, click the page's run button.
+- Docker: `docker build -t strategy-lab .` (web build + `requirements-api.txt`); `render.yaml` deploys it on Render.
 - Browser tests: Playwright lives in project 06's venv (`../06-financial-terminal/backend/.venv/bin/python`), using system Chrome.
 
 ## Architecture
@@ -16,7 +17,7 @@ Guidance for coding agents working in this repository. The README describes the 
 - Core research modules (no Streamlit imports): `backtester.py`, `metrics.py`, `strategies/`, `optimization.py`, `validation.py`, `comparison.py`, `pairs_trading_*.py`.
 - Web API: `api/` (FastAPI; `main.py` routes, `schemas.py` Pydantic models, `services.py` core calls, `serialize.py` NaN→null/ISO dates, `cache.py` download cache). `api/CONTRACT.md` is the single source of truth for request/response shapes; change it first.
 - Web UI: `web/` (React 19, Vite, Tailwind v4, TanStack Query, ECharts). `src/api/types.ts` mirrors the contract; all formatting lives in `src/lib/format.ts`.
-- Legacy UI pages: `*_app.py`, dispatched from `app.py`. Keep research logic out of these; several pages still contain logic that belongs in the core (see "Known debt").
+- Legacy UI pages: `*_app.py`, dispatched from `app.py`. Keep research logic out of these.
 - `strategies/__init__.py` is the registry: implementation, metadata (powers forms and the Strategy Guide), default parameters, optimization grids. Every integer parameter is a window length; `get_lookback_observations` relies on that.
 
 ## Invariants (do not break)
@@ -32,12 +33,12 @@ Guidance for coding agents working in this repository. The README describes the 
 - `metrics.calculate_performance_metrics` returns `calmar_ratio`; `OptimizationResults` carries `probabilistic_sharpe_ratio` and `deflated_sharpe_ratio`.
 - Pairs method names live in `pairs_trading_core` (`METHOD_*`); the sensitivity optimizer is `pairs_trading_sensitivity.py`; multi-pair OOS portfolios are `pairs_trading_portfolio.py`.
 
-## Known debt / next steps
+## Next steps
 
-- The Streamlit UI (with ~1,100 lines of duplicated code) is frozen as a reference; new features land in the web app only. Delete it once the web app is accepted.
-- API requests are synchronous; long optimizations block a worker. Background jobs with progress (SSE) are the next step.
-- Pairs gross exposure is 1x; constant cash/borrow rates (no rate history).
-- Multi-asset portfolio engine (signals × allocator from project 03) is the planned next feature.
+- The Streamlit UI is kept as a reference; new features land in the web app only.
+- Background jobs with progress (SSE) for long optimizations.
+- Cash and borrow rates from a rate history.
+- Multi-asset portfolio engine (signals × allocator from project 03).
 
 ## Workflow
 
