@@ -358,7 +358,7 @@ def _render_validation_table(
                 "Test One-Way Turnover": "{:.2f}×",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -395,7 +395,7 @@ def _render_test_equity_chart(
 
     st.plotly_chart(
         figure,
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -515,7 +515,7 @@ def render_validation_page() -> None:
         run_validation = st.button(
             "Run validation",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
     if start_date >= split_date:
@@ -732,7 +732,7 @@ def _render_walk_forward_fold_table(
                 "Robust Relative OOS Degradation": "{:+.1%}",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -811,7 +811,7 @@ def _render_walk_forward_aggregate(
             },
             na_rep="N/A",
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -856,7 +856,7 @@ def _render_walk_forward_parameter_history(
 
     st.dataframe(
         history,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -899,7 +899,7 @@ def _render_walk_forward_equity_chart(
 
     st.plotly_chart(
         figure,
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -1039,7 +1039,7 @@ def _render_walk_forward_validation_page() -> None:
         run_walk_forward = st.button(
             "Run walk-forward validation",
             type="primary",
-            use_container_width=True,
+            width="stretch",
         )
 
     if start_date >= end_date:

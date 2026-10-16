@@ -4,16 +4,17 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from backtester import run_backtest, run_strategy_on_data
+from backtester import run_backtest, run_strategy_on_window
 from metrics import calculate_performance_metrics
 from optimization import (
+    RELATIVE_DEGRADATION_SCALE_FLOOR,
     OptimizationObjective,
     OptimizationResults,
     OptimizationRobustnessDiagnostics,
     calculate_optimization_robustness,
     optimize_strategy,
 )
-from strategies import apply_strategy, get_default_parameters
+from strategies import get_default_parameters
 
 
 @dataclass
@@ -103,17 +104,24 @@ def _evaluate_training_parameters(
     training_data: pd.DataFrame,
     strategy_name: str,
     parameters: dict[str, Any],
+    training_evaluation_start: pd.Timestamp,
     initial_capital: float,
     transaction_cost_bps: float,
+    cash_rate: float,
     risk_free_rate: float,
 ) -> tuple[pd.DataFrame, dict[str, float]]:
-    """Evaluate one fixed parameter set over the training sample."""
-    results = run_strategy_on_data(
+    """
+    Evaluate one fixed parameter set over the scored part of the training
+    sample, using the same warmed-up window as the optimizer.
+    """
+    results = run_strategy_on_window(
         data=training_data,
         strategy_name=strategy_name,
+        evaluation_start=training_evaluation_start,
         strategy_parameters=parameters,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
     )
 
     metrics = _calculate_metrics(
@@ -132,6 +140,7 @@ def _evaluate_test_parameters_with_history(
     split_date: pd.Timestamp,
     initial_capital: float,
     transaction_cost_bps: float,
+    cash_rate: float,
     risk_free_rate: float,
 ) -> tuple[pd.DataFrame, dict[str, float]]:
     """
@@ -143,52 +152,15 @@ def _evaluate_test_parameters_with_history(
     trading day before the test sample, so test-period capital starts from the
     selected initial capital and pays the appropriate initial entry cost.
     """
-    strategy_data = apply_strategy(
+    test_results = run_strategy_on_window(
         data=full_data,
         strategy_name=strategy_name,
+        evaluation_start=split_date,
         strategy_parameters=parameters,
-    )
-
-    test_mask = strategy_data.index >= split_date
-    test_index = strategy_data.index[test_mask]
-
-    if len(test_index) == 0:
-        raise ValueError(
-            "No trading observations are available on or after the "
-            "selected validation split date."
-        )
-
-    first_test_index = test_index[0]
-    first_position = strategy_data.index.get_loc(first_test_index)
-
-    if not isinstance(first_position, (int, np.integer)):
-        raise ValueError(
-            "The market-data index must uniquely identify each trading day."
-        )
-
-    if first_position <= 0:
-        raise ValueError(
-            "At least one pre-test trading observation is required so the "
-            "first out-of-sample position can be formed without look-ahead."
-        )
-
-    context_index = strategy_data.index[first_position - 1]
-    evaluation_data = strategy_data.loc[context_index:].copy()
-
-    evaluation_results = run_backtest(
-        data=evaluation_data,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
     )
-
-    test_results = evaluation_results.loc[
-        evaluation_results.index >= split_date
-    ].copy()
-
-    if test_results.empty:
-        raise ValueError(
-            "The out-of-sample backtest contains no test observations."
-        )
 
     metrics = _calculate_metrics(
         results=test_results,
@@ -206,8 +178,10 @@ def _evaluate_parameter_set(
     label: str,
     parameters: dict[str, Any],
     split_date: pd.Timestamp,
+    training_evaluation_start: pd.Timestamp,
     initial_capital: float,
     transaction_cost_bps: float,
+    cash_rate: float,
     risk_free_rate: float,
 ) -> ParameterSetValidation:
     """Evaluate the same frozen parameter set in training and test samples."""
@@ -216,8 +190,10 @@ def _evaluate_parameter_set(
             training_data=training_data,
             strategy_name=strategy_name,
             parameters=parameters,
+            training_evaluation_start=training_evaluation_start,
             initial_capital=initial_capital,
             transaction_cost_bps=transaction_cost_bps,
+            cash_rate=cash_rate,
             risk_free_rate=risk_free_rate,
         )
     )
@@ -230,6 +206,7 @@ def _evaluate_parameter_set(
             split_date=split_date,
             initial_capital=initial_capital,
             transaction_cost_bps=transaction_cost_bps,
+            cash_rate=cash_rate,
             risk_free_rate=risk_free_rate,
         )
     )
@@ -280,20 +257,27 @@ def calculate_out_of_sample_degradation(
     Measure how much the selected objective deteriorates out of sample.
 
     Positive values represent deterioration. Negative values mean the test
-    sample improved relative to the training sample. The relative value is
-    NaN when the training objective is zero.
+    sample improved relative to the training sample.
+
+    The relative value is scaled by the training magnitude with the same
+    per-objective floor as the optimizer's robustness diagnostics, so a
+    training Sharpe near zero cannot turn a small change into a
+    thousands-of-percent "degradation".
     """
     if objective == "annualized_volatility":
         absolute_degradation = test_value - training_value
     else:
         absolute_degradation = training_value - test_value
 
-    if training_value == 0:
+    scale = max(
+        abs(training_value),
+        RELATIVE_DEGRADATION_SCALE_FLOOR.get(objective, 0.0),
+    )
+
+    if not np.isfinite(scale) or scale == 0:
         relative_degradation = np.nan
     else:
-        relative_degradation = (
-            absolute_degradation / abs(training_value)
-        )
+        relative_degradation = absolute_degradation / scale
 
     return (
         float(absolute_degradation),
@@ -351,6 +335,9 @@ def build_validation_summary(
                 "test_max_drawdown": parameter_set.test_metrics[
                     "max_drawdown"
                 ],
+                "test_calmar_ratio": parameter_set.test_metrics[
+                    "calmar_ratio"
+                ],
                 "test_rebalancing_days": parameter_set.test_metrics[
                     "rebalancing_days"
                 ],
@@ -399,6 +386,9 @@ def build_validation_summary(
             "test_max_drawdown": validation.benchmark_test_metrics[
                 "max_drawdown"
             ],
+            "test_calmar_ratio": validation.benchmark_test_metrics[
+                "calmar_ratio"
+            ],
             "test_rebalancing_days": validation.benchmark_test_metrics[
                 "rebalancing_days"
             ],
@@ -419,6 +409,7 @@ def validate_strategy_out_of_sample(
     objective: OptimizationObjective = "sharpe_ratio",
     initial_capital: float = 10_000,
     transaction_cost_bps: float = 10,
+    cash_rate: float = 0.0,
     risk_free_rate: float = 0.0,
 ) -> ValidationResults:
     """
@@ -467,6 +458,7 @@ def validate_strategy_out_of_sample(
         objective=objective,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
         risk_free_rate=risk_free_rate,
     )
 
@@ -485,8 +477,10 @@ def validate_strategy_out_of_sample(
         label="Default parameters",
         parameters=default_parameters,
         split_date=split_timestamp,
+        training_evaluation_start=optimization_result.evaluation_start,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
         risk_free_rate=risk_free_rate,
     )
 
@@ -497,8 +491,10 @@ def validate_strategy_out_of_sample(
         label="Raw optimum",
         parameters=optimized_parameters,
         split_date=split_timestamp,
+        training_evaluation_start=optimization_result.evaluation_start,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
         risk_free_rate=risk_free_rate,
     )
 
@@ -509,8 +505,10 @@ def validate_strategy_out_of_sample(
         label="Robust candidate",
         parameters=robust_parameters,
         split_date=split_timestamp,
+        training_evaluation_start=optimization_result.evaluation_start,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
         risk_free_rate=risk_free_rate,
     )
 
@@ -526,6 +524,7 @@ def validate_strategy_out_of_sample(
         data=benchmark_test_data,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
     )
     benchmark_test_metrics = _calculate_benchmark_metrics(
         results=benchmark_test_results,
@@ -954,6 +953,7 @@ def validate_strategy_walk_forward(
     test_window_years: int = 1,
     initial_capital: float = 10_000,
     transaction_cost_bps: float = 10,
+    cash_rate: float = 0.0,
     risk_free_rate: float = 0.0,
 ) -> WalkForwardResults:
     """
@@ -1044,6 +1044,7 @@ def validate_strategy_walk_forward(
             objective=objective,
             initial_capital=initial_capital,
             transaction_cost_bps=transaction_cost_bps,
+            cash_rate=cash_rate,
             risk_free_rate=risk_free_rate,
         )
 

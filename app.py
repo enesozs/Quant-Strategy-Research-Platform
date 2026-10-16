@@ -2,6 +2,7 @@ import streamlit as st
 
 from comparison_app import render_comparison_page
 from optimization_app import render_optimization_page
+from pairs_trading_app import render_pairs_trading_page
 from single_strategy_app import render_single_strategy_page
 from strategy_guide_app import render_strategy_guide_page
 from validation_app import render_validation_page
@@ -25,6 +26,7 @@ def main() -> None:
                 "Single Strategy",
                 "Optimization Lab",
                 "Validation Lab",
+                "Pairs Trading Lab",
                 "Strategy Guide",
             ],
             key="analysis_mode",
@@ -45,6 +47,8 @@ def main() -> None:
         render_optimization_page()
     elif analysis_mode == "Validation Lab":
         render_validation_page()
+    elif analysis_mode == "Pairs Trading Lab":
+        render_pairs_trading_page()
     else:
         render_strategy_guide_page()
 

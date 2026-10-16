@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 import yfinance as yf
 
@@ -45,10 +46,19 @@ def calculate_returns(data: pd.DataFrame) -> pd.DataFrame:
     return result
 
 
+TRADING_DAYS_PER_YEAR = 252
+
+
+def _daily_rate(annual_rate: float) -> float:
+    return (1 + annual_rate) ** (1 / TRADING_DAYS_PER_YEAR) - 1
+
+
 def run_backtest(
     data: pd.DataFrame,
     initial_capital: float = 10_000,
     transaction_cost_bps: float = 10,
+    cash_rate: float = 0.0,
+    financing_spread: float = 0.01,
 ) -> pd.DataFrame:
     """
     Calculate strategy returns, transaction costs,
@@ -66,6 +76,10 @@ def run_backtest(
     costs on changes in portfolio exposure. Buy and Hold is
     treated as an executable benchmark and pays one initial
     one-way transaction cost when the position is established.
+
+    Capital not invested in the asset earns cash_rate (annual). Exposure
+    above 100% is borrowed at cash_rate plus financing_spread. Both are
+    part of the gross return, so costs remain the only deduction.
     """
     if initial_capital <= 0:
         raise ValueError("Initial capital must be positive.")
@@ -118,9 +132,24 @@ def run_backtest(
         transaction_cost_bps / 10_000
     )
 
+    if cash_rate <= -1:
+        raise ValueError("The cash rate must be greater than -100%.")
+
+    cash_weight = 1.0 - result["position"]
+    daily_cash_rate = _daily_rate(cash_rate)
+    daily_borrow_rate = _daily_rate(cash_rate + financing_spread)
+
+    # No time has elapsed on the first observation (its asset return is
+    # undefined), so it earns nothing.
+    result["cash_return"] = (
+        cash_weight.clip(lower=0.0) * daily_cash_rate
+        + cash_weight.clip(upper=0.0) * daily_borrow_rate
+    ).where(result["asset_return"].notna())
+
     result["gross_strategy_return"] = (
         result["position"]
         * result["asset_return"]
+        + result["cash_return"]
     )
 
     result["transaction_cost"] = (
@@ -218,6 +247,7 @@ def run_strategy_on_data(
     strategy_parameters: dict | None = None,
     initial_capital: float = 10_000,
     transaction_cost_bps: float = 10,
+    cash_rate: float = 0.0,
 ) -> pd.DataFrame:
     """
     Apply one strategy to prepared market data and backtest it.
@@ -232,7 +262,64 @@ def run_strategy_on_data(
         data=strategy_data,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
     )
+
+
+def run_strategy_on_window(
+    data: pd.DataFrame,
+    strategy_name: str,
+    evaluation_start: pd.Timestamp,
+    strategy_parameters: dict | None = None,
+    initial_capital: float = 10_000,
+    transaction_cost_bps: float = 10,
+    cash_rate: float = 0.0,
+) -> pd.DataFrame:
+    """
+    Backtest a strategy over the rows on or after evaluation_start, with
+    indicators warmed up on every earlier row of data.
+
+    The portfolio starts flat on the last observation before
+    evaluation_start, so the first evaluated day can hold the position
+    signalled by that observation and pays its entry cost. Only rows on or
+    after evaluation_start are returned.
+    """
+    strategy_data = apply_strategy(
+        data=data,
+        strategy_name=strategy_name,
+        strategy_parameters=strategy_parameters,
+    )
+
+    evaluation_start = pd.Timestamp(evaluation_start)
+    first_location = int(
+        strategy_data.index.searchsorted(evaluation_start, side="left")
+    )
+
+    if first_location >= len(strategy_data):
+        raise ValueError(
+            "No observations are available on or after the evaluation start."
+        )
+
+    if first_location == 0:
+        raise ValueError(
+            "At least one observation before the evaluation start is "
+            "required so the first evaluated position has no look-ahead."
+        )
+
+    window = strategy_data.iloc[first_location - 1:].copy()
+
+    # Both the strategy and Buy and Hold enter at the context row's close,
+    # so neither may earn that row's own return.
+    window.iloc[0, window.columns.get_loc("asset_return")] = np.nan
+
+    results = run_backtest(
+        data=window,
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
+    )
+
+    return results.iloc[1:].copy()
 
 
 def build_backtest(
@@ -243,6 +330,7 @@ def build_backtest(
     strategy_parameters: dict | None = None,
     initial_capital: float = 10_000,
     transaction_cost_bps: float = 10,
+    cash_rate: float = 0.0,
 ) -> pd.DataFrame:
     """
     Download data and run one complete strategy backtest.
@@ -259,4 +347,5 @@ def build_backtest(
         strategy_parameters=strategy_parameters,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
     )

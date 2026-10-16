@@ -143,6 +143,124 @@ def calculate_max_drawdown(
     return drawdown.min()
 
 
+def calculate_calmar_ratio(
+    cagr: float,
+    max_drawdown: float,
+) -> float:
+    """
+    Calculate CAGR divided by the magnitude of the maximum drawdown.
+
+    Returns NaN when there was no drawdown, because the ratio is then
+    undefined rather than infinitely good.
+    """
+    if not np.isfinite(cagr) or not np.isfinite(max_drawdown):
+        return np.nan
+
+    if np.isclose(max_drawdown, 0.0):
+        return np.nan
+
+    return float(cagr / abs(max_drawdown))
+
+
+def calculate_probabilistic_sharpe_ratio(
+    returns: pd.Series,
+    benchmark_sharpe: float = 0.0,
+    risk_free_rate: float = 0.0,
+) -> float:
+    """
+    Probability that the true annualized Sharpe ratio exceeds a benchmark,
+    given the sample length, skewness and kurtosis of the returns
+    (Bailey and Lopez de Prado, 2012).
+    """
+    from scipy.stats import norm
+
+    clean = returns.dropna()
+    observations = len(clean)
+
+    if observations < 3:
+        return np.nan
+
+    observed = calculate_sharpe_ratio(clean, risk_free_rate=risk_free_rate)
+
+    if not np.isfinite(observed):
+        return np.nan
+
+    # The PSR formula works with per-period Sharpe ratios.
+    scale = np.sqrt(TRADING_DAYS_PER_YEAR)
+    sharpe = observed / scale
+    benchmark = benchmark_sharpe / scale
+    skewness = float(clean.skew())
+    kurtosis = float(clean.kurt()) + 3.0
+
+    variance = (
+        1.0
+        - skewness * sharpe
+        + (kurtosis - 1.0) / 4.0 * sharpe**2
+    )
+
+    if not np.isfinite(variance) or variance <= 0:
+        return np.nan
+
+    statistic = (
+        (sharpe - benchmark)
+        * np.sqrt(observations - 1)
+        / np.sqrt(variance)
+    )
+
+    return float(norm.cdf(statistic))
+
+
+def calculate_expected_maximum_sharpe(
+    trial_sharpes: pd.Series,
+) -> float:
+    """
+    Expected best annualized Sharpe ratio among N independent trials that
+    all have zero true skill, given the dispersion of the observed trial
+    Sharpe ratios (the "false strategy" benchmark).
+    """
+    from scipy.stats import norm
+
+    clean = pd.Series(trial_sharpes, dtype=float).replace(
+        [np.inf, -np.inf],
+        np.nan,
+    ).dropna()
+    trials = len(clean)
+
+    if trials < 2:
+        return 0.0
+
+    euler_gamma = 0.5772156649015329
+    dispersion = float(clean.std(ddof=1))
+
+    return float(
+        dispersion
+        * (
+            (1 - euler_gamma) * norm.ppf(1 - 1 / trials)
+            + euler_gamma * norm.ppf(1 - 1 / (trials * np.e))
+        )
+    )
+
+
+def calculate_deflated_sharpe_ratio(
+    returns: pd.Series,
+    trial_sharpes: pd.Series,
+    risk_free_rate: float = 0.0,
+) -> float:
+    """
+    Probability that the selected strategy's Sharpe ratio reflects real
+    skill after accounting for how many configurations were tried
+    (Bailey and Lopez de Prado, 2014).
+
+    Grid trials are correlated, so treating them as independent makes this
+    a conservative (low) estimate.
+    """
+    return calculate_probabilistic_sharpe_ratio(
+        returns,
+        benchmark_sharpe=calculate_expected_maximum_sharpe(trial_sharpes),
+        risk_free_rate=risk_free_rate,
+    )
+
+
 def calculate_performance_metrics(
     returns: pd.Series,
     equity: pd.Series,
@@ -152,15 +270,21 @@ def calculate_performance_metrics(
     """
     Calculate the main performance metrics for a strategy.
     """
+    cagr = calculate_cagr(
+        equity,
+        initial_value=initial_value,
+    )
+    max_drawdown = calculate_max_drawdown(
+        equity,
+        initial_value=initial_value,
+    )
+
     return {
         "total_return": calculate_total_return(
             equity,
             initial_value=initial_value,
         ),
-        "cagr": calculate_cagr(
-            equity,
-            initial_value=initial_value,
-        ),
+        "cagr": cagr,
         "annualized_volatility": calculate_annualized_volatility(
             returns
         ),
@@ -168,8 +292,6 @@ def calculate_performance_metrics(
             returns,
             risk_free_rate=risk_free_rate,
         ),
-        "max_drawdown": calculate_max_drawdown(
-            equity,
-            initial_value=initial_value,
-        ),
+        "max_drawdown": max_drawdown,
+        "calmar_ratio": calculate_calmar_ratio(cagr, max_drawdown),
     }

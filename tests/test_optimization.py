@@ -2,6 +2,7 @@ import numpy as np
 import pandas as pd
 import pytest
 
+from backtester import calculate_returns, run_strategy_on_data, run_strategy_on_window
 from optimization import (
     calculate_optimization_gain,
     calculate_relative_optimization_gain,
@@ -386,3 +387,58 @@ def test_refined_integer_grid_retains_broad_optimum_and_bounds() -> None:
     assert max(refined["fast_window"]) <= 500
     assert min(refined["slow_window"]) >= 2
     assert max(refined["slow_window"]) <= 500
+
+def test_candidates_are_scored_after_a_common_burn_in() -> None:
+    data = calculate_returns(create_market_data())
+    grid = {"fast_window": [5, 20], "slow_window": [50, 200]}
+
+    result = optimize_strategy(
+        data=data,
+        strategy_name="moving_average",
+        parameter_grid=grid,
+    )
+
+    # The 200-day slow window needs 200 rows before its first signal, so
+    # nothing may be scored earlier than that.
+    assert result.evaluation_start >= data.index[200]
+
+
+def test_burn_in_removes_cold_start_cash_drag() -> None:
+    data = calculate_returns(create_market_data())
+    evaluation_start = data.index[300]
+
+    warm = run_strategy_on_window(
+        data=data,
+        strategy_name="moving_average",
+        evaluation_start=evaluation_start,
+        strategy_parameters={"fast_window": 20, "slow_window": 200},
+    )
+    full = run_strategy_on_data(
+        data=data,
+        strategy_name="moving_average",
+        strategy_parameters={"fast_window": 20, "slow_window": 200},
+    )
+
+    assert warm.index[0] == evaluation_start
+    # Positions after the first day match an uninterrupted backtest.
+    pd.testing.assert_series_equal(
+        warm["position"].iloc[1:],
+        full.loc[evaluation_start:, "position"].iloc[1:],
+    )
+    # Buy and Hold enters at the prior close, so it earns only the first
+    # evaluated day's return less its entry cost.
+    expected = 10_000 * (1 - 0.001) * (1 + data.loc[evaluation_start, "asset_return"])
+    assert warm["buy_hold_equity"].iloc[0] == pytest.approx(expected)
+
+
+def test_near_zero_optimum_does_not_explode_relative_degradation() -> None:
+    from optimization import _calculate_relative_objective_degradation
+
+    degradation = _calculate_relative_objective_degradation(
+        values=np.array([0.02, 0.018]),
+        best_value=0.02,
+        objective="sharpe_ratio",
+    )
+
+    # A Sharpe difference of 0.002 is noise, not a 10% degradation.
+    assert degradation[1] < 0.01

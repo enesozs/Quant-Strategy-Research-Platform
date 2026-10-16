@@ -5,11 +5,16 @@ from typing import Any, Literal
 import numpy as np
 import pandas as pd
 
-from backtester import run_strategy_on_data
-from metrics import calculate_performance_metrics
+from backtester import run_strategy_on_window
+from metrics import (
+    calculate_deflated_sharpe_ratio,
+    calculate_performance_metrics,
+    calculate_probabilistic_sharpe_ratio,
+)
 from strategies import (
     STRATEGY_METADATA,
     get_default_parameters,
+    get_lookback_observations,
     get_optimization_grid,
 )
 
@@ -19,6 +24,7 @@ OptimizationObjective = Literal[
     "annualized_volatility",
     "sharpe_ratio",
     "max_drawdown",
+    "calmar_ratio",
 ]
 
 
@@ -33,6 +39,14 @@ class OptimizationResults:
     best_metrics: dict[str, float]
     default_parameters: dict[str, Any]
     default_metrics: dict[str, float]
+    # First date every candidate is scored on. Earlier rows only warm up
+    # indicators, so short and long lookbacks are compared on equal terms.
+    evaluation_start: pd.Timestamp | None = None
+    # Probability that the raw optimum's Sharpe ratio is above zero, before
+    # (probabilistic) and after (deflated) accounting for the number of
+    # configurations tried. NaN when the optimum never traded.
+    probabilistic_sharpe_ratio: float = float("nan")
+    deflated_sharpe_ratio: float = float("nan")
 
 
 @dataclass
@@ -145,21 +159,59 @@ def _calculate_activity_statistics(
     return rebalancing_days, cumulative_turnover
 
 
+def resolve_evaluation_start(
+    data: pd.DataFrame,
+    strategy_name: str,
+    parameter_grid: dict[str, list[Any]],
+) -> pd.Timestamp:
+    """
+    Return the first date on which every grid candidate has warm indicators.
+
+    Scoring each candidate from the start of the sample would leave long
+    lookbacks in cash for much of the window, rewarding them under
+    drawdown/volatility objectives and penalising them under return/Sharpe.
+    A common burn-in removes that bias.
+    """
+    burn_in = max(
+        get_lookback_observations(
+            strategy_name,
+            {name: max(values) for name, values in parameter_grid.items()},
+        ),
+        get_lookback_observations(strategy_name),
+    )
+
+    minimum_scored_observations = 20
+
+    if len(data) < burn_in + minimum_scored_observations:
+        raise ValueError(
+            f"The sample has {len(data)} observations, but the longest "
+            f"lookback in the grid needs {burn_in} for warmup plus "
+            f"{minimum_scored_observations} to score. Use a longer sample "
+            "or shorter windows."
+        )
+
+    return pd.Timestamp(data.index[burn_in])
+
+
 def _evaluate_parameters(
     data: pd.DataFrame,
     strategy_name: str,
     parameters: dict[str, Any],
     initial_capital: float,
     transaction_cost_bps: float,
+    cash_rate: float,
     risk_free_rate: float,
+    evaluation_start: pd.Timestamp,
 ) -> tuple[pd.DataFrame, dict[str, float]]:
     """Run one parameter combination and calculate its research metrics."""
-    results = run_strategy_on_data(
+    results = run_strategy_on_window(
         data=data,
         strategy_name=strategy_name,
+        evaluation_start=evaluation_start,
         strategy_parameters=parameters,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
     )
 
     metrics = calculate_performance_metrics(
@@ -179,7 +231,9 @@ def optimize_strategy(
     objective: OptimizationObjective = "sharpe_ratio",
     initial_capital: float = 10_000,
     transaction_cost_bps: float = 10,
+    cash_rate: float = 0.0,
     risk_free_rate: float = 0.0,
+    evaluation_start: pd.Timestamp | None = None,
 ) -> OptimizationResults:
     """
     Exhaustively evaluate a strategy over a discrete parameter grid.
@@ -187,6 +241,9 @@ def optimize_strategy(
     This is an in-sample research tool. A high-performing parameter set from
     this function should not be treated as validated until it is evaluated on
     unseen data or with walk-forward analysis.
+
+    Every candidate is scored from the same evaluation_start. When it is not
+    supplied, it is placed after the longest lookback in the grid.
     """
     if initial_capital <= 0:
         raise ValueError("Initial capital must be positive.")
@@ -212,13 +269,24 @@ def optimize_strategy(
 
     default_parameters = get_default_parameters(strategy_name)
 
+    if evaluation_start is None:
+        evaluation_start = resolve_evaluation_start(
+            data=data,
+            strategy_name=strategy_name,
+            parameter_grid=grid,
+        )
+    else:
+        evaluation_start = pd.Timestamp(evaluation_start)
+
     default_results, default_metrics = _evaluate_parameters(
         data=data,
         strategy_name=strategy_name,
         parameters=default_parameters,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
         risk_free_rate=risk_free_rate,
+        evaluation_start=evaluation_start,
     )
 
     default_rebalancing_days, default_turnover = (
@@ -266,7 +334,9 @@ def optimize_strategy(
             parameters=candidate_parameters,
             initial_capital=initial_capital,
             transaction_cost_bps=transaction_cost_bps,
+            cash_rate=cash_rate,
             risk_free_rate=risk_free_rate,
+            evaluation_start=evaluation_start,
         )
 
         rebalancing_days, turnover = (
@@ -285,6 +355,7 @@ def optimize_strategy(
             ],
             "sharpe_ratio": metrics["sharpe_ratio"],
             "max_drawdown": metrics["max_drawdown"],
+            "calmar_ratio": metrics["calmar_ratio"],
             "rebalancing_days": rebalancing_days,
             "turnover": turnover,
         }
@@ -311,10 +382,13 @@ def optimize_strategy(
 
     ascending = not _objective_is_maximized(objective)
 
+    # A stable sort with turnover as the tie-breaker makes the selected
+    # optimum deterministic when several combinations score identically.
     optimization_table = optimization_table.sort_values(
-        by=objective,
-        ascending=ascending,
+        by=[objective, "turnover"],
+        ascending=[ascending, True],
         na_position="last",
+        kind="mergesort",
     ).reset_index(drop=True)
 
     best_row = optimization_table.iloc[0]
@@ -342,11 +416,24 @@ def optimize_strategy(
         ),
         "sharpe_ratio": float(best_row["sharpe_ratio"]),
         "max_drawdown": float(best_row["max_drawdown"]),
+        "calmar_ratio": float(best_row["calmar_ratio"]),
         "rebalancing_days": float(
             best_row["rebalancing_days"]
         ),
         "turnover": float(best_row["turnover"]),
     }
+
+    best_results, _ = _evaluate_parameters(
+        data=data,
+        strategy_name=strategy_name,
+        parameters={**default_parameters, **best_parameters},
+        initial_capital=initial_capital,
+        transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
+        risk_free_rate=risk_free_rate,
+        evaluation_start=evaluation_start,
+    )
+    best_returns = best_results["strategy_return"]
 
     return OptimizationResults(
         strategy_name=strategy_name,
@@ -356,7 +443,18 @@ def optimize_strategy(
         best_metrics=best_metrics,
         default_parameters=default_parameters,
         default_metrics=default_metrics,
+        evaluation_start=evaluation_start,
+        probabilistic_sharpe_ratio=calculate_probabilistic_sharpe_ratio(
+            best_returns,
+            risk_free_rate=risk_free_rate,
+        ),
+        deflated_sharpe_ratio=calculate_deflated_sharpe_ratio(
+            best_returns,
+            trial_sharpes=optimization_table["sharpe_ratio"],
+            risk_free_rate=risk_free_rate,
+        ),
     )
+
 
 def _create_refined_parameter_values(
     strategy_name: str,
@@ -501,6 +599,7 @@ def optimize_strategy_coarse_to_fine(
     objective: OptimizationObjective = "sharpe_ratio",
     initial_capital: float = 10_000,
     transaction_cost_bps: float = 10,
+    cash_rate: float = 0.0,
     risk_free_rate: float = 0.0,
     refinement_points: int = 5,
 ) -> CoarseToFineOptimizationResults:
@@ -518,6 +617,7 @@ def optimize_strategy_coarse_to_fine(
         objective=objective,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
         risk_free_rate=risk_free_rate,
     )
 
@@ -535,7 +635,9 @@ def optimize_strategy_coarse_to_fine(
         objective=objective,
         initial_capital=initial_capital,
         transaction_cost_bps=transaction_cost_bps,
+        cash_rate=cash_rate,
         risk_free_rate=risk_free_rate,
+        evaluation_start=broad_result.evaluation_start,
     )
 
     return CoarseToFineOptimizationResults(
@@ -569,6 +671,7 @@ def calculate_optimization_gain(
         "total_return",
         "cagr",
         "max_drawdown",
+        "calmar_ratio",
     }:
         return optimized_value - default_value
 
@@ -842,13 +945,34 @@ class OptimizationRobustnessDiagnostics:
     robust_candidate_relative_gap: float
 
 
+# Smallest optimum magnitude used as the denominator of relative degradation.
+RELATIVE_DEGRADATION_SCALE_FLOOR: dict[str, float] = {
+    "sharpe_ratio": 0.5,
+    "total_return": 0.05,
+    "cagr": 0.02,
+    "annualized_volatility": 0.02,
+    "max_drawdown": 0.05,
+    "calmar_ratio": 0.25,
+}
+
+
 def _calculate_relative_objective_degradation(
     values: np.ndarray,
     best_value: float,
     objective: OptimizationObjective,
 ) -> np.ndarray:
-    """Return non-negative objective loss relative to the optimum."""
-    scale = max(abs(best_value), 1e-12)
+    """
+    Return non-negative objective loss relative to the optimum.
+
+    The scale has an absolute floor per objective. Without it, an optimum
+    near zero (a Sharpe of 0.02, or a drawdown of 0% from a strategy that
+    barely trades) turns negligible differences into huge relative losses,
+    which makes the near-optimal shares and plateau labels meaningless.
+    """
+    scale = max(
+        abs(best_value),
+        RELATIVE_DEGRADATION_SCALE_FLOOR.get(objective, 1e-12),
+    )
 
     if objective == "annualized_volatility":
         degradation = values - best_value

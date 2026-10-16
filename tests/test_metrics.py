@@ -284,4 +284,29 @@ def test_performance_metrics_returns_all_expected_metrics() -> None:
         "annualized_volatility",
         "sharpe_ratio",
         "max_drawdown",
+        "calmar_ratio",
     }
+
+def test_calmar_ratio_is_undefined_without_drawdown() -> None:
+    from metrics import calculate_calmar_ratio
+
+    assert calculate_calmar_ratio(0.10, -0.20) == pytest.approx(0.5)
+    assert np.isnan(calculate_calmar_ratio(0.10, 0.0))
+
+
+def test_deflated_sharpe_falls_as_more_trials_are_run() -> None:
+    from metrics import (
+        calculate_deflated_sharpe_ratio,
+        calculate_probabilistic_sharpe_ratio,
+    )
+
+    rng = np.random.default_rng(7)
+    returns = pd.Series(rng.normal(0.0005, 0.01, 1000))
+    few = pd.Series(rng.normal(0.5, 0.3, 5))
+    many = pd.Series(rng.normal(0.5, 0.3, 500))
+
+    psr = calculate_probabilistic_sharpe_ratio(returns)
+    deflated_few = calculate_deflated_sharpe_ratio(returns, few)
+    deflated_many = calculate_deflated_sharpe_ratio(returns, many)
+
+    assert 0.0 <= deflated_many < deflated_few < psr <= 1.0

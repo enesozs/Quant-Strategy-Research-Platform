@@ -18,7 +18,7 @@ from strategies.keltner import generate_keltner_signals
 from strategies.multi_timeframe_trend import generate_multi_timeframe_trend_signals
 from strategies.regime_filtered_trend import generate_regime_filtered_trend_signals
 from strategies.volatility_targeted_momentum import generate_volatility_targeted_momentum_signals
-from typing import Any, TypeAlias
+from typing import TypeAlias
 
 StrategyFunction = Callable[..., pd.DataFrame]
 StrategyParameters: TypeAlias = dict[str, Any]
@@ -789,7 +789,6 @@ STRATEGY_METADATA: dict[str, dict[str, Any]] = {
             "rather than merely excluding one historically bad period."
         ),
         "related_strategies": ["ADX Trend Filter", "Moving-Average Crossover", "Volatility-Targeted Momentum"],
-        "features": ["Regime Filter"],
         "description": (
             "Holds the asset when price is above a long-term "
             "trend average and realized volatility remains below "
@@ -856,7 +855,6 @@ STRATEGY_METADATA: dict[str, dict[str, Any]] = {
             "whether optimized windows repeatedly select similar horizons."
         ),
         "related_strategies": ["Moving-Average Crossover", "EMA Crossover", "ADX Trend Filter"],
-        "features": ["Multi-Timeframe"],
         "description": (
             "Holds the asset only when both daily and weekly "
             "trend conditions are positive."
@@ -888,7 +886,7 @@ STRATEGY_METADATA: dict[str, dict[str, Any]] = {
         "display_name": "Volatility-Targeted Momentum",
         "family": "Momentum",
         "subtype": "Risk-Managed Momentum",
-        "features": ["Momentum", "Volatility Targeting", "Continuous Position Sizing"],
+        "features": ["Momentum", "Volatility Targeting", "Continuous Position Sizing", "Risk-Managed Position Sizing"],
         "signal_style": "Continuous long-or-cash exposure with volatility-scaled position sizing",
         "best_suited_for": "Momentum with changing market volatility",
         "favorable_environment": (
@@ -912,7 +910,6 @@ STRATEGY_METADATA: dict[str, dict[str, Any]] = {
             "risk targeting matters as much as selecting the highest in-sample Sharpe ratio."
         ),
         "related_strategies": ["Price Momentum", "Volatility-Filtered Trend", "ADX Trend Filter"],
-        "features": ["Risk-Managed Position Sizing"],
         "description": (
             "Uses momentum to determine whether to invest and "
             "realized volatility to determine position size."
@@ -1089,9 +1086,12 @@ def apply_strategy(
         else get_default_parameters(strategy_name)
     )
 
+    # Merge over the defaults so a partial parameter set (for example the
+    # best row of a grid that only varies some parameters) runs exactly the
+    # configuration that was evaluated.
     parameters: dict[str, Any] = {
-        str(key): value
-        for key, value in raw_parameters.items()
+        **get_default_parameters(strategy_name),
+        **{str(key): value for key, value in raw_parameters.items()},
     }
 
     strategy_function = STRATEGIES[strategy_name]
@@ -1122,3 +1122,41 @@ def get_default_parameters(
         for parameter_name, specification
         in parameter_specs.items()
     }
+
+
+def get_lookback_observations(
+    strategy_name: str,
+    strategy_parameters: StrategyParameters | None = None,
+) -> int:
+    """
+    Estimate how many daily observations a strategy needs before its
+    indicators are fully formed.
+
+    Every integer parameter in the registry is a window length. Weekly
+    windows are converted to trading days, and indicators that chain two
+    smoothing stages (ADX, MACD) need both stages to warm up.
+    """
+    parameters = {
+        **get_default_parameters(strategy_name),
+        **(strategy_parameters or {}),
+    }
+
+    if strategy_name == "adx":
+        return 2 * int(parameters["adx_window"]) + 1
+    if strategy_name == "macd":
+        return int(parameters["slow_window"]) + int(
+            parameters["signal_window"]
+        )
+    if strategy_name == "multi_timeframe_trend":
+        return max(
+            int(parameters["daily_window"]),
+            5 * int(parameters["weekly_window"]) + 5,
+        )
+
+    specifications = STRATEGY_METADATA[strategy_name]["parameters"]
+    windows = [
+        int(parameters[name])
+        for name, specification in specifications.items()
+        if specification["type"] == "int"
+    ]
+    return max(windows, default=0) + 1

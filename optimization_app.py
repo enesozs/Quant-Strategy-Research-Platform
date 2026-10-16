@@ -267,6 +267,19 @@ def _create_grid_values(
     return [round(value, 12) for value in values]
 
 
+def _create_grid_values_or_stop(
+    parameter_name: str,
+    **grid_arguments: Any,
+) -> list[Any]:
+    """Build one custom-grid dimension, or report invalid bounds and stop."""
+    try:
+        return _create_grid_values(**grid_arguments)
+    except ValueError as error:
+        st.error(f"{parameter_name}: {error}")
+        st.stop()
+        raise
+
+
 def _render_custom_grid_controls(
     strategy_name: str,
     predefined_grid: dict[str, list[Any]],
@@ -362,7 +375,8 @@ def _render_custom_grid_controls(
                     ),
                 )
 
-                custom_grid[parameter_name] = _create_grid_values(
+                custom_grid[parameter_name] = _create_grid_values_or_stop(
+                    parameter_name=parameter_name,
                     minimum=int(minimum_value),
                     maximum=int(maximum_value),
                     step=int(step_value),
@@ -409,7 +423,8 @@ def _render_custom_grid_controls(
                 ),
             )
 
-            custom_grid[parameter_name] = _create_grid_values(
+            custom_grid[parameter_name] = _create_grid_values_or_stop(
+                parameter_name=parameter_name,
                 minimum=float(minimum_display) / scale,
                 maximum=float(maximum_display) / scale,
                 step=float(step_display) / scale,
@@ -583,7 +598,7 @@ def _render_grid_preview(
 
     st.dataframe(
         pd.DataFrame(preview_rows),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -704,7 +719,7 @@ def _render_parameter_sensitivity_profiles(
                 "Tested values": "{:.0f}",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -762,7 +777,7 @@ def _render_parameter_sensitivity_profiles(
             parameter_index % 2
         ].plotly_chart(
             figure,
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -930,7 +945,7 @@ def render_optimization_page() -> None:
             run_button = st.form_submit_button(
                 "Run optimization",
                 type="primary",
-                use_container_width=True,
+                width="stretch",
             )
 
         if search_mode == "Predefined":
@@ -1163,6 +1178,14 @@ def render_optimization_page() -> None:
         f"Grid: {grid_description}"
     )
 
+    if result.evaluation_start is not None:
+        st.caption(
+            "All candidates and the default are scored from "
+            f"{pd.Timestamp(result.evaluation_start).date()}. Earlier "
+            "observations only warm up indicators, so the longest lookback "
+            "in the grid is not penalised for starting in cash."
+        )
+
     column_1, column_2, column_3, column_4 = st.columns(4)
 
     column_1.metric(
@@ -1342,7 +1365,7 @@ def render_optimization_page() -> None:
                 "One-Way Turnover": "{:.2f}×",
             }
         ),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -1472,7 +1495,7 @@ def render_optimization_page() -> None:
 
         st.plotly_chart(
             heatmap,
-            use_container_width=True,
+            width="stretch",
         )
 
         fixed_parameters = {

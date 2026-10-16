@@ -1,0 +1,9 @@
+# Render Blueprint: New → Blueprint → pick this repository.
+services:
+  - type: web
+    name: strategy-lab
+    runtime: docker
+    region: frankfurt
+    plan: free
+    healthCheckPath: /api/health
+    autoDeploy: true

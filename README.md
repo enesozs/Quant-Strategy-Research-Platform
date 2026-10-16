@@ -1,1139 +1,402 @@
-# 📈 Quant Strategy Research Platform
+# Strategy Lab
 
-A quantitative research platform for implementing, backtesting, comparing, optimizing, and validating systematic trading strategies on historical equity data.
-
-Built with **Python**, **pandas**, **NumPy**, **Plotly**, **Streamlit** and **yfinance**.
-
----
+A research platform for **backtesting, optimizing and validating systematic trading strategies**,
+from single-asset trend and mean-reversion rules to market-neutral pairs trading. A tested Python
+research engine is served by a FastAPI backend and explored through a React web app.
 
 ![Python](https://img.shields.io/badge/Python-3.13-3776AB?logo=python&logoColor=white)
-![Streamlit](https://img.shields.io/badge/Streamlit-research%20platform-FF4B4B?logo=streamlit&logoColor=white)
-![Tests](https://img.shields.io/badge/tests-pytest-0A9EDC?logo=pytest&logoColor=white)
+![FastAPI](https://img.shields.io/badge/FastAPI-0.143-009688?logo=fastapi&logoColor=white)
+![React](https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=black)
+![TypeScript](https://img.shields.io/badge/TypeScript-6-3178C6?logo=typescript&logoColor=white)
+![Tests](https://img.shields.io/badge/tests-250%20%2B%2017%20passing-0A9EDC?logo=pytest&logoColor=white)
 [![License](https://img.shields.io/badge/license-MIT-2EA44F)](LICENSE)
 
-[![Open in Streamlit](https://static.streamlit.io/badges/streamlit_badge_black_white.svg)](https://quant-strategy-research-platform.streamlit.app)
+> **Educational research tool.** Nothing here is investment advice or a trading signal. Results
+> are historical simulations under stated assumptions and do not predict future performance.
 
-> **This project is designed for quantitative strategy research and education. It is not a trading signal service, automated execution system, or source of investment recommendations.**
+The project is built around one question:
 
-The platform is built around a simple idea: a strong historical backtest is only the beginning of strategy research.
+> **Did a strategy work, or did it just fit the past?**
 
-A strategy may perform well because its underlying idea captured persistent market behavior, because its parameters happened to fit a particular historical period, or simply because the selected sample was favorable. The platform therefore goes beyond individual backtests by providing tools for parameter sensitivity analysis, robustness diagnostics, out-of-sample testing, and walk-forward validation.
+A strong backtest can come from a real, persistent market behaviour, or from parameters that
+happened to fit one sample. The platform separates the two:
+- **Same rules for everyone:** every strategy and parameter set is scored on the same dates, costs
+  and cash assumptions.
+- **Selection is measured:** robustness diagnostics and a deflated Sharpe ratio show how much of
+  an optimum the number of trials alone could explain.
+- **Out-of-sample evidence:** parameters chosen on one period are frozen and tested on the next,
+  once (split) or repeatedly (walk-forward).
 
 ---
 
-## Research Workflow
+## Contents
 
-The application is organized around a progressively more demanding research process:
+- [Application overview](#application-overview)
+- Pages: [Compare & Backtest](#compare-and-backtest) · [Optimize](#optimize) ·
+  [Validate](#validate) · [Pairs trading](#pairs-trading) · [Guide](#strategy-guide)
+- [Included strategies](#included-strategies)
+- [Backtesting methodology](#backtesting-methodology)
+- [Correctness and validation](#correctness-and-validation)
+- [Architecture](#architecture)
+- [Technology](#technology)
+- [Getting started](#getting-started)
+- [API](#api)
+- [Adding a strategy](#adding-a-strategy)
+- [Deployment](#deployment)
+- [Assumptions](#assumptions)
+
+---
+
+## Application overview
+
+<p align="center">
+  <img src="docs/screenshots/compare.jpg" alt="Compare page: every strategy on AAPL, best-of tiles, equity curves against Buy and Hold" width="95%">
+</p>
+
+Every research page shares one layout: settings in the sidebar under the navigation, headline
+metrics at the top, then charts and tables explaining where the result comes from. Results stay
+on screen while you change settings, with a banner when they no longer match the controls.
+
+| Page | Research question |
+|---|---|
+| **Compare** | How did every strategy behave on the same ticker, period, costs and cash assumptions? |
+| **Backtest** | What did one strategy do: signals on the price chart, exposure, equity and drawdown against Buy and Hold? |
+| **Optimize** | Which parameters scored best in-sample, and is that optimum a broad plateau or an isolated peak? |
+| **Validate** | Do parameters chosen on earlier data keep working on data they never saw? (split and walk-forward) |
+| **Pairs** | Does a market-neutral spread between two related assets mean-revert profitably, and does pair *selection* work out of sample? |
+| **Guide** | What is each strategy's idea, where should it work, where does it fail, and what do its parameters mean? |
+
+---
+
+## Compare and Backtest
+
+<p align="center">
+  <img src="docs/screenshots/backtest.jpg" alt="Backtest page: metric tiles against Buy and Hold, equity curve and drawdown" width="95%">
+</p>
+
+- **Compare** runs all 15 strategies on one ticker and ranks them on total return, CAGR,
+  volatility, Sharpe, maximum drawdown and Calmar, with Buy and Hold ranked alongside. It also
+  draws equity and drawdown for up to four strategies, a risk-versus-return scatter, and a
+  drawdown ranking. Optionally, each strategy is first optimized on its predefined grid; those
+  results are labelled **in-sample**.
+- **Backtest** studies one strategy in depth:
+  - metric tiles with the difference from Buy and Hold;
+  - equity and drawdown curves;
+  - the price chart with the strategy's indicators and shading while a position is held;
+  - an oscillator panel for RSI, CCI, ADX or MACD with their thresholds;
+  - exposure, turnover and rebalancing activity.
+
+## Optimize
+
+<p align="center">
+  <img src="docs/screenshots/optimize.jpg" alt="Optimize page: optimum against defaults, probabilistic and deflated Sharpe, robustness and heatmap" width="95%">
+</p>
+
+- **Searches:** a predefined research grid, a custom grid (up to 5,000 combinations), or a
+  coarse-to-fine search that refines locally around the broad optimum.
+- **Objectives:** Sharpe ratio, total return, CAGR, volatility, maximum drawdown or Calmar.
+- **Common burn-in.** Every candidate is scored from the same date, after the longest lookback
+  in the grid. Earlier observations only warm up indicators. Without this, a 200-day window
+  would spend months in cash while a 20-day one traded, which biases every comparison.
+- **Probabilistic and deflated Sharpe ratio** (Bailey & López de Prado). These give the
+  probability that the optimum's true Sharpe is above zero, before and after accounting for
+  every combination tried. For example, the best AAPL moving-average crossover scores 93%
+  before the adjustment and 75% after 58 trials, so the score reflects the search as well as
+  the strategy.
+- **Robustness diagnostics:** the share of combinations within 5% and 10% of the optimum,
+  neighbourhood degradation, boundary optima, a plateau or peak label, and a
+  **stability-oriented candidate** chosen from the near-optimal region.
+- **Sensitivity:** a two-parameter heatmap with the optimum starred, and best/median profiles
+  for each parameter.
+
+## Validate
+
+<p align="center">
+  <img src="docs/screenshots/walk-forward.jpg" alt="Walk-forward validation: stitched out-of-sample equity and fold evidence" width="95%">
+</p>
+
+- **Split.** The sample is divided at a date. Parameters are optimized on the training period
+  only, then frozen and evaluated on the test period. Defaults, the raw optimum and the robust
+  candidate are compared with Buy and Hold, with out-of-sample degradation for each.
+- **Walk-forward.** The split is repeated through time:
+  - expanding windows keep all history; rolling windows keep a fixed recent length;
+  - each fold's test window stays unseen when its parameters are chosen;
+  - fold results are stitched into one continuous out-of-sample equity curve. Positions carry
+    across fold boundaries, and costs apply only to actual changes in exposure;
+  - parameter history shows whether the chosen parameters stay stable from fold to fold.
+
+## Pairs trading
+
+<p align="center">
+  <img src="docs/screenshots/pairs-research.jpg" alt="Pairs research: KO/PEP spread z-score with entry, exit and stop bands and trade markers" width="95%">
+</p>
+
+When two related prices diverge, buy the cheap leg, short the rich one, and wait for the spread
+to converge. Three spread models are available:
+
+| Model | Spread | Hedge ratio | Trades when |
+|---|---|---|---|
+| **Distance** (Gatev et al.) | Difference of prices normalized to each formation window | 1:1 dollars | Always |
+| **Cointegration** (Engle–Granger) | OLS residual of log prices, refit each formation window | Frozen per window | Only in windows that pass cointegration, half-life and mean-crossing tests |
+| **Kalman** | Innovation of a filter tracking `log A = α + β·log B` | Adaptive, locked at entry | Always (after warmup) |
+
+All three share the same trade mechanics:
+- **Rules:** entry, exit, stop and time-stop rules, with a cooldown after stops. The default exit
+  is full convergence (z = 0). Trades never open beyond the stop.
+- **Execution and costs:** next-day execution, proportional costs on both legs, an annual borrow
+  fee on the short leg, and the cash rate earned on idle capital.
+- **Trade log:** entry and exit dates, leg contributions and exit reason for every trade.
+
+**Discover and Portfolio.** One pair's backtest mostly measures the luck of that pair. Discovery
+ranks a universe of candidates, and presets cover beverages, oil majors, banks, payments,
+country and sector ETFs, and precious metals.
+- **No selection look-ahead:** the ranking uses the opening formation window only.
+- **Multiple testing:** a Bonferroni-adjusted p-value shows how many "cointegrated" pairs could
+  be chance.
+- **Portfolio:** trades the top N pairs strictly after the selection window as one
+  equal-weight book. This tests the *selection process* out of sample.
+
+<p align="center">
+  <img src="docs/screenshots/pairs-portfolio.jpg" alt="Pairs portfolio: equal-weight book of the top five pairs, traded after the selection window" width="95%">
+</p>
+
+**What to expect.** The engine captures an edge when one exists. On synthetic pairs with a
+strongly mean-reverting spread, cointegration reaches a Sharpe ratio of about 2.0, distance
+1.6–1.9 and Kalman about 1.2. On a pure random-walk spread, cointegration correctly declines to
+trade. On real pairs it acts as a filter: it approves about 20% of formation windows, and the
+windows it approves trade better than the ones it rejects.
+
+## Strategy Guide
+
+<p align="center">
+  <img src="docs/screenshots/guide.jpg" alt="Strategy Guide: searchable strategy cards grouped by family" width="95%">
+</p>
+
+Each strategy documents:
+- its family, signal style and thesis;
+- the market behaviour it is designed around;
+- favourable and unfavourable environments, and its main risks;
+- parameter definitions;
+- optimization and validation notes.
+
+Each detail page links straight to Backtest, Optimize and Validate.
+
+---
+
+## Included strategies
+
+Fifteen strategies across four families. They were chosen to represent distinct systematic ideas
+rather than to maximize the catalogue: parameter variations of one idea belong in the optimizer,
+not in new strategies.
+
+| Family | Strategies |
+|---|---|
+| Trend following | Moving-Average Crossover · EMA Crossover · MACD Crossover · ADX Trend Filter · Volatility-Filtered Trend · Daily and Weekly Trend Confirmation |
+| Breakout | Donchian Breakout · ATR Breakout · Keltner Channel Breakout |
+| Momentum | Price Momentum · Volatility-Targeted Momentum (continuous position sizing) |
+| Mean reversion | RSI · Bollinger Bands · Stochastic · CCI |
+
+---
+
+## Backtesting methodology
+
+- **Data:** adjusted daily prices from Yahoo Finance (`yfinance`); daily simple returns.
+- **No look-ahead:** a signal computed from information on day *t* sets the position for day
+  *t + 1*. Breakout channels use prior-period levels.
+- **Positions:**
+  - single-asset strategies are long or cash, with continuous sizing (0–150%) for
+    volatility-targeted momentum;
+  - pairs hold a long and a short leg with gross exposure of 100% of capital.
+- **Costs:** one-way proportional costs on every change in exposure (`0.4 → 0.7` costs 0.3 of
+  turnover). Buy and Hold pays one entry cost.
+- **Cash and financing:**
+  - idle cash earns the cash rate (by default, the risk-free rate);
+  - exposure above 100% is borrowed at the cash rate plus a financing spread;
+  - the short leg of a pair pays an annual borrow fee.
+- **Metrics:** total return, CAGR (calendar time), volatility (×√252), Sharpe ratio (excess of
+  the risk-free rate), maximum drawdown and Calmar ratio. Also turnover, rebalancing days and
+  average exposure, so a partly invested strategy can be compared fairly with a fully invested
+  benchmark.
+
+---
+
+## Correctness and validation
+
+The test suite (250 Python tests, 17 frontend tests, all offline on synthetic data) checks:
+- **Timing and costs:**
+  - positions use the previous day's signal;
+  - costs scale with turnover;
+  - Buy and Hold pays exactly one entry cost;
+  - cash interest and financing are credited and charged correctly.
+- **No leakage:**
+  - training and test samples are strictly separated;
+  - test indicators warm up on history only;
+  - walk-forward stitching equals one continuous backtest when every fold uses the same
+    parameters;
+  - discovery ranks only on the selection window.
+- **Optimization:**
+  - objective directions are correct;
+  - every candidate is scored on the same window;
+  - robustness and degradation stay stable for optima near zero;
+  - tie-breaking is deterministic;
+  - the deflated Sharpe ratio falls as trials increase.
+- **Pairs:**
+  - stateful entry/exit/stop/cooldown rules;
+  - trade attribution, including exit costs and exit reasons;
+  - the Kalman z-score is calibrated to the realised spread;
+  - the filter uses only past information.
+- **API:** every endpoint, request validation, error codes and NaN-free JSON.
+- **Browser:** every page and its main run was driven with Playwright in both themes at desktop
+  and phone widths, with no console errors.
+
+---
+
+## Architecture
+
+Three layers, each depending only on the one below:
+
+```
+web/        React + TypeScript UI ──── fetch /api/* ────▶  api/  FastAPI
+                                                              │  validation + serialisation, no math
+                                                              ▼
+            backtester · metrics · strategies/ · optimization · validation · comparison · pairs_trading_*
+                                         research engine (pandas / NumPy / statsmodels, no web code)
+```
 
 ```text
-Strategy implementation
-        ↓
-Historical backtest
-        ↓
-Cross-strategy comparison
-        ↓
-Parameter optimization
-        ↓
-Robustness diagnostics
-        ↓
-Out-of-sample validation
-        ↓
-Walk-forward validation
-```
-
-Each stage answers a different question.
-
-**Backtesting**
-
-> How did this strategy behave historically under the selected assumptions?
-
-**Comparison**
-
-> How did different systematic approaches behave over the same market period?
-
-**Optimization**
-
-> Which tested parameters maximize the selected historical objective?
-
-**Robustness analysis**
-
-> Is the mathematical optimum surrounded by similarly strong parameter choices, or is it an isolated peak?
-
-**Out-of-sample validation**
-
-> Do parameters selected on earlier observations retain their behavior on data that was not used to select them?
-
-**Walk-forward validation**
-
-> Does parameter selection continue to work when the optimization and unseen-test process is repeated through time?
-
-The platform deliberately separates these questions rather than treating the highest in-sample performance as sufficient evidence of strategy quality.
-
----
-
-# Platform Preview
-
-The screenshots below use **AAPL** over a common historical period to demonstrate the main research workflow.
-
-They are intended to show how the application moves from strategy comparison and individual backtesting toward parameter research, robustness analysis, and repeated out-of-sample validation.
-
-## Cross-Strategy Comparison
-
-Compare all registered strategies under the same ticker, time period, capital, transaction-cost, and risk-free-rate assumptions.
-
-![Cross-strategy comparison and rankings](assets/comparison-overview.png)
-
-## Single-Strategy Research
-
-Inspect one strategy's parameters, headline metrics, market exposure, trades, and strategy-specific indicators.
-
-The example below shows the default Donchian Breakout implementation using prior rolling High/Low channels.
-
-![Donchian Breakout single-strategy research](assets/single-strategy-donchian.png)
-
-## Coarse-to-Fine Optimization
-
-Compare the default configuration with the mathematical optimum and inspect how a broad parameter search is refined locally around the most promising region.
-
-![Coarse-to-fine optimization summary](assets/optimization-summary.png)
-
-## Parameter Sensitivity and Robustness
-
-The optimization surface is used to investigate whether strong historical performance is concentrated around a narrow parameter peak or supported by a wider near-optimal region.
-
-![Parameter sensitivity and robustness diagnostics](assets/optimization-robustness.png)
-
-## Walk-Forward Validation
-
-Repeated chronological training and unseen-test folds evaluate whether parameter selection remains useful outside the observations used for optimization.
-
-![Aggregate walk-forward out-of-sample evidence](assets/validation-walk-forward-overview.png)
-
-## Parameter Stability and Stitched OOS Performance
-
-Walk-forward validation also records how selected parameters change across folds and compounds the unseen test periods into continuous stitched out-of-sample research curves.
-
-![Walk-forward parameter stability and stitched out-of-sample equity](assets/validation-walk-forward-stability.png)
-
----
-
-# Features
-
-## Compare All Strategies
-
-Run every registered strategy on the same ticker and historical period under common assumptions.
-
-The comparison framework reports metrics including:
-
-- Final portfolio value
-- Total return
-- CAGR
-- Annualized volatility
-- Sharpe ratio
-- Maximum drawdown
-- Rebalancing activity
-- Cumulative one-way turnover
-- Average market exposure
-- Buy and Hold benchmark performance
-
-Strategies can be ranked across multiple performance and risk dimensions rather than by return alone.
-
-The comparison page can also optionally use optimized parameters. Because those parameters are selected from the same historical sample being compared, optimized comparison results are explicitly treated as **in-sample research rather than validated evidence**.
-
----
-
-## Single Strategy
-
-Study one strategy in greater detail.
-
-The Single Strategy page provides:
-
-- Configurable strategy parameters
-- Strategy-specific indicators
-- Price and signal visualizations
-- Position behavior
-- Strategy and Buy and Hold equity curves
-- Drawdown analysis
-- Performance metrics
-- Rebalancing activity
-- One-way turnover
-- Average market exposure
-
-An optional optimized-parameter mode can search the strategy's predefined research grid before running the backtest.
-
-Optimized results are clearly identified as in-sample and potentially vulnerable to overfitting.
-
----
-
-## Optimization Lab
-
-The Optimization Lab studies how strategy performance changes across parameter configurations.
-
-It supports:
-
-- Predefined research grids
-- Custom parameter grids
-- Coarse-to-fine parameter search
-- Multiple optimization objectives
-- Ranked parameter combinations
-- Two-dimensional parameter sensitivity heatmaps
-- Higher-dimensional parameter sensitivity profiles
-- Boundary-optimum diagnostics
-- Near-optimal-region analysis
-- Stability-oriented parameter selection
-
-Supported optimization objectives include:
-
-- Sharpe ratio
-- Total return
-- CAGR
-- Annualized volatility
-- Maximum drawdown
-
-The platform distinguishes between the **raw optimum** and a **stability-oriented candidate**.
-
-The raw optimum is the mathematical best tested parameter combination for the selected objective.
-
-The stability-oriented candidate is selected from the near-optimal region using the behavior of its surrounding tested parameter neighborhood. This provides an alternative to automatically trusting a single isolated optimum.
-
----
-
-# Optimization Robustness
-
-A high-performing parameter combination is not necessarily a robust one.
-
-The platform therefore analyzes the shape of the tested optimization surface.
-
-Diagnostics include:
-
-- Share of tested combinations within 5% of the optimum
-- Share within 10% of the optimum
-- Performance of the immediate tested-grid neighborhood
-- Median nearby objective degradation
-- Boundary-optimum detection
-- Stability-oriented candidate selection
-
-Optimization surfaces are summarized using descriptive labels:
-
-- **Broad plateau**
-- **Moderate plateau**
-- **Narrow peak**
-
-A broad near-optimal region can be more reassuring than an isolated optimum because small parameter changes do not immediately destroy the historical result.
-
-These classifications are intentionally treated as **descriptive heuristics**, not statistical proof that a strategy is or is not overfit.
-
----
-
-# Validation Lab
-
-Optimization tells us what worked best on historical training data.
-
-Validation asks the more important question:
-
-> What happened after those parameters were selected?
-
-The Validation Lab provides both single-split and walk-forward out-of-sample testing.
-
----
-
-## Single-Split Validation
-
-The historical sample is divided into two chronological regions:
-
-```text
-Training period
-      ↓
-Parameter optimization
-      ↓
-Parameters frozen
-      ↓
-Unseen test period
-```
-
-Observations before the split are used for optimization.
-
-Observations on or after the split are reserved for out-of-sample evaluation.
-
-The test period is not used to select the raw optimum or stability-oriented candidate.
-
-The platform compares:
-
-- Default parameters
-- Raw training optimum
-- Stability-oriented candidate
-- Buy and Hold
-
-Training and test performance are displayed separately so deterioration outside the optimization sample can be observed directly.
-
----
-
-## Expanding Walk-Forward Validation
-
-Expanding walk-forward validation repeats the optimization and unseen-test process through time while retaining all previous training history.
-
-For example:
-
-```text
-2020–2021 → test 2022
-2020–2022 → test 2023
-2020–2023 → test 2024
-2020–2024 → test 2025
-```
-
-Each test window remains unseen when its parameters are selected.
-
-This evaluates whether parameter selection remains useful as more historical information becomes available.
-
----
-
-## Rolling Walk-Forward Validation
-
-Rolling validation instead keeps a fixed-length recent training window.
-
-For example:
-
-```text
-2020–2021 → test 2022
-2021–2022 → test 2023
-2022–2023 → test 2024
-2023–2024 → test 2025
-```
-
-Older observations eventually leave the optimization sample.
-
-This allows the platform to investigate whether strategy behavior appears more stable when parameter selection emphasizes relatively recent market regimes.
-
----
-
-## Walk-Forward Evidence
-
-For every fold, the platform records:
-
-- Training period
-- Test period
-- Training robustness
-- Default test objective
-- Raw-optimum test objective
-- Robust-candidate test objective
-- Buy and Hold test objective
-- Out-of-sample degradation
-- Whether optimized parameters beat the defaults
-- Whether the stability-oriented candidate beat the raw optimum
-- Selected parameter history
-
-Repeated unseen periods are also summarized into aggregate walk-forward evidence.
-
-The application builds stitched out-of-sample equity curves to show how the sequence of unseen test periods behaves as a continuous research portfolio.
-
-Fold-level metrics remain independently rebased for comparison, while stitched strategy curves transition continuously between successive out-of-sample folds. Transaction costs at fold boundaries therefore apply to the actual change in exposure rather than unnecessarily liquidating and rebuilding an unchanged position.
-
-Repeated out-of-sample success is stronger evidence than a single optimized historical backtest, but it still does **not** guarantee future performance.
-
----
-
-# Strategy Guide
-
-The Strategy Guide documents the ideas represented by the platform rather than treating strategies as black boxes.
-
-Each registered strategy includes information such as:
-
-- Strategy family
-- Strategy subtype
-- Signal style
-- Main features
-- Core idea
-- Strategy thesis
-- Market behavior it is designed around
-- Favorable environments
-- Unfavorable environments
-- Main risks
-- Parameter definitions
-- Optimization considerations
-- Validation considerations
-- Related strategies
-
-Descriptions of favorable and unfavorable environments refer to **market behavior**, not claims that a strategy will reliably outperform on a particular stock, sector, or future period.
-
-The Strategy Guide is intended to connect the mathematical implementation with the economic intuition behind each research rule.
-
----
-
-# Included Strategies
-
-The platform currently includes 15 strategies covering several systematic research ideas.
-
-## Trend Following
-
-- Moving-Average Crossover
-- EMA Crossover
-- MACD Crossover
-- ADX Trend Filter
-- Volatility-Filtered Trend
-- Daily and Weekly Trend Confirmation
-
-## Breakout
-
-- Donchian Breakout
-- ATR Breakout
-- Keltner Channel Breakout
-
-## Momentum
-
-- Price Momentum
-- Volatility-Targeted Momentum
-
-## Mean Reversion
-
-- RSI Mean Reversion
-- Bollinger-Band Mean Reversion
-- Stochastic Mean Reversion
-- CCI Mean Reversion
-
-The Strategy Guide provides the detailed interpretation, parameter definitions, risks, and intended market behavior for each implementation.
-
----
-
-# Why 15 Strategies?
-
-The number of strategies is intentionally limited.
-
-The goal of the platform is **not to maximize the size of the strategy catalog**. Instead, the included strategies are intended to represent meaningfully different systematic ideas while keeping the research environment understandable, auditable, and extensible.
-
-Many apparently different strategies are better understood as parameter variations of the same underlying idea.
-
-For example, separate moving-average window combinations do not need to become separate strategies. They belong inside the parameter and optimization framework.
-
-Adding dozens of minor indicator variations would increase the feature count without necessarily increasing the research value of the project.
-
-The included set therefore prioritizes:
-
-- Coverage of distinct systematic ideas
-- Interpretability
-- Parameter research
-- Robustness analysis
-- Out-of-sample validation
-- Code clarity
-- Extensibility
-
-The 15 included strategies should be viewed as a **curated research set and examples of the framework**, not as the limits of the platform.
-
----
-
-# Adding a Custom Strategy
-
-The strategy architecture is designed to be extensible.
-
-A new strategy can be integrated into the existing research workflow without creating separate comparison, optimization, or validation systems.
-
-## 1. Create a strategy module
-
-Add a new Python file inside:
-
-```text
-strategies/
-```
-
-For example:
-
-```text
-strategies/my_strategy.py
-```
-
-A long-or-cash strategy should generate a `signal` column:
-
-```python
-import pandas as pd
-
-
-def generate_my_strategy_signals(
-    data: pd.DataFrame,
-    window: int = 20,
-) -> pd.DataFrame:
-    result = data.copy()
-
-    # Calculate indicators here.
-
-    result["signal"] = ...
-
-    return result
-```
-
-The signal convention is:
-
-```text
-0 = cash
-1 = long
-```
-
-Strategies using continuous position sizing can additionally provide:
-
-```python
-result["target_position"]
-```
-
-The backtester prioritizes `target_position` when it is available, allowing fractional exposure rather than forcing every strategy into binary long/cash positions.
-
----
-
-## 2. Register the strategy
-
-Import and register the implementation in:
-
-```text
-strategies/__init__.py
-```
-
-The central strategy registry connects the implementation to the rest of the application.
-
----
-
-## 3. Add strategy metadata
-
-Add the strategy's metadata and parameter definitions to the central metadata registry.
-
-Metadata powers the Strategy Guide and other research interfaces, including information such as:
-
-- Display name
-- Family
-- Subtype
-- Features
-- Signal style
-- Description
-- Thesis
-- Favorable environment
-- Unfavorable environment
-- Risks
-- Parameter specifications
-- Optimization guidance
-- Validation guidance
-
-Automated tests verify that registered strategies contain the required documentation fields.
-
----
-
-## 4. Add an optimization grid
-
-Define a predefined research grid for the strategy so it can participate in Optimization Lab and optimized research workflows.
-
-Parameter grids should be broad enough to investigate meaningful behavior without creating unnecessarily large brute-force searches.
-
----
-
-## 5. Run the tests
-
-After adding a strategy:
-
-```bash
-python -m pytest
-```
-
-The existing test suite checks strategy output, registry integrity, metadata completeness, backtester compatibility, and other research assumptions.
-
----
-
-# Backtesting Methodology
-
-## Historical Data
-
-Historical market data is downloaded using `yfinance`.
-
-Adjusted historical prices are used so corporate actions represented by the adjusted series are reflected in the backtest.
-
----
-
-## Returns
-
-Daily simple returns are calculated from adjusted closing prices.
-
----
-
-## Signal Timing and Look-Ahead Protection
-
-Strategy indicators and signals may use information available on trading day \(t\).
-
-The resulting desired exposure is shifted by one trading observation before portfolio returns are calculated.
-
-Conceptually:
-
-```text
-Information available on day t
-            ↓
-Signal calculated on day t
-            ↓
-Position used on day t + 1
-```
-
-This prevents a strategy from using a closing-price signal to retroactively earn the return that produced that same closing price.
-
-Breakout strategies may additionally use prior-period channel levels where required by their definitions.
-
----
-
-## Position Model
-
-The platform is currently long-only.
-
-Most strategies use binary exposure:
-
-```text
-0 = cash
-1 = fully invested
-```
-
-Strategies designed around risk-managed position sizing can use continuous target exposure.
-
-Negative exposure is rejected by the backtester.
-
----
-
-## Transaction Costs
-
-Transaction costs are modeled as configurable **one-way proportional costs on changes in portfolio exposure**.
-
-For example:
-
-```text
-0.0 → 1.0 = 1.0 one-way turnover
-1.0 → 0.0 = 1.0 one-way turnover
-0.4 → 0.7 = 0.3 one-way turnover
-```
-
-This allows the same transaction-cost model to support both binary and continuously sized strategies.
-
----
-
-## Buy and Hold Benchmark
-
-Buy and Hold is treated as an executable benchmark rather than a cost-free theoretical curve.
-
-The benchmark pays one initial one-way transaction cost when its position is established and then remains invested.
-
----
-
-## Average Market Exposure
-
-Average market exposure is calculated from the realized position series.
-
-For binary strategies, it approximately represents the proportion of the backtest spent invested.
-
-For continuously sized strategies, it represents the average fraction of capital exposed to the asset.
-
-This provides useful context when comparing a partially invested strategy with a 100%-exposed Buy and Hold benchmark.
-
----
-
-# Performance Metrics
-
-The platform reports several complementary performance measures.
-
-## Total Return
-
-Total compounded return over the complete research period.
-
-## CAGR
-
-Compound annual growth rate based on elapsed calendar time.
-
-## Annualized Volatility
-
-Daily return volatility annualized using 252 trading days.
-
-## Sharpe Ratio
-
-Annualized risk-adjusted return relative to the selected annual risk-free rate.
-
-## Maximum Drawdown
-
-Largest historical peak-to-trough decline in portfolio equity.
-
-## Rebalancing Days
-
-Number of trading observations on which portfolio exposure changes.
-
-## One-Way Turnover
-
-Cumulative absolute change in portfolio exposure.
-
-## Average Market Exposure
-
-Mean realized portfolio position over the research period.
-
-No single metric is treated as sufficient evidence of strategy quality.
-
----
-
-# Parameter Optimization
-
-Parameter optimization evaluates combinations from a defined parameter grid under identical backtesting assumptions.
-
-The selected objective determines how parameter combinations are ranked.
-
-Higher values are preferred for:
-
-- Sharpe ratio
-- Total return
-- CAGR
-- Maximum drawdown, where values closer to zero are better
-
-Lower values are preferred for:
-
-- Annualized volatility
-
-Optimization results are historical and in-sample unless they are subsequently evaluated through the Validation Lab.
-
----
-
-# Coarse-to-Fine Search
-
-For strategies with larger parameter spaces, the Optimization Lab supports a two-stage search.
-
-## Stage 1 — Broad Search
-
-A relatively sparse grid explores the wider parameter space.
-
-## Stage 2 — Local Refinement
-
-A denser grid is constructed around the broad-stage winner.
-
-The refinement process interpolates candidate values inside the local neighborhood rather than simply adding a fixed numeric amount to every parameter.
-
-Integer parameters remain integer-valued, metadata bounds are respected, and invalid parameter relationships are filtered before evaluation.
-
-This provides greater local resolution without requiring exhaustive evaluation of every possible numeric value.
-
----
-
-# Robustness vs. Optimization
-
-The project deliberately distinguishes **optimization** from **robustness**.
-
-Optimization asks:
-
-> Which tested parameter combination produced the best historical objective?
-
-Robustness asks:
-
-> How dependent was that result on selecting exactly those parameters?
-
-An isolated optimum surrounded by substantially worse configurations may indicate greater parameter-selection risk than a broad region of similarly strong results.
-
-The stability-oriented candidate therefore provides an alternative research reference point, but it is not automatically assumed to be superior to the raw optimum.
-
-Its usefulness must still be evaluated out of sample.
-
----
-
-# Out-of-Sample Research Philosophy
-
-The project intentionally avoids treating optimization as the final research result.
-
-A parameter configuration can perform extremely well on the observations used to select it and poorly afterward.
-
-For this reason, the research workflow separates:
-
-```text
-Parameter selection
-```
-
-from:
-
-```text
-Parameter evaluation
-```
-
-Single-split validation provides one unseen historical experiment.
-
-Walk-forward validation repeats that experiment through time.
-
-Neither eliminates overfitting or guarantees future performance, but both provide more meaningful evidence than reporting optimized in-sample results alone.
-
----
-
-# Project Structure
-
-A simplified view of the repository:
-
-```text
-Quant-Strategy-Research-Platform/
-│
-├── app.py
-├── main.py
-│
-├── backtester.py
-├── metrics.py
-├── comparison.py
-├── optimization.py
-├── validation.py
-├── plots.py
-│
-├── comparison_app.py
-├── single_strategy_app.py
-├── optimization_app.py
-├── validation_app.py
-├── strategy_guide_app.py
-│
-├── run_optimization.py
-│
-├── strategies/
-│   ├── __init__.py
-│   ├── moving_average.py
-│   ├── ema_crossover.py
-│   ├── rsi.py
-│   ├── bollinger.py
-│   ├── stochastic.py
-│   ├── macd.py
-│   ├── momentum.py
-│   ├── donchian.py
-│   ├── atr_breakout.py
-│   ├── adx.py
-│   ├── cci.py
-│   ├── keltner.py
-│   ├── volatility_filter.py
-│   ├── multi_timeframe_trend.py
-│   └── volatility_targeted_momentum.py
-│
-├── tests/
-│   ├── test_backtester.py
-│   ├── test_comparison.py
-│   ├── test_metrics.py
-│   ├── test_optimization.py
-│   ├── test_optimization_robustness.py
-│   ├── test_strategies.py
-│   ├── test_strategy_guide_metadata.py
-│   └── test_validation.py
-│
-├── assets/
-│   ├── comparison-overview.png
-│   ├── single-strategy-donchian.png
-│   ├── optimization-summary.png
-│   ├── optimization-robustness.png
-│   ├── validation-walk-forward-overview.png
-│   └── validation-walk-forward-stability.png
-│
-├── LICENSE
-├── requirements.txt
-├── .gitignore
-└── README.md
+02-strategy-backtester/
+├── backtester.py              # signal timing, costs, cash/financing, warm-window backtests
+├── metrics.py                 # performance metrics, Calmar, probabilistic and deflated Sharpe
+├── strategies/                # 15 strategy modules + registry (metadata, defaults, grids)
+├── optimization.py            # grids, coarse-to-fine, burn-in, sensitivity, robustness
+├── validation.py              # split and walk-forward validation, stitched OOS equity
+├── comparison.py              # all strategies under common assumptions, rankings
+├── pairs_trading_core.py      # pair data, stateful signals, two-leg backtester, trade log
+├── pairs_trading_distance.py · pairs_trading_cointegration.py · pairs_trading_dynamic.py
+├── pairs_trading_discovery.py # universe ranking on the opening window, presets
+├── pairs_trading_portfolio.py # out-of-sample multi-pair portfolio
+├── pairs_trading_sensitivity.py
+├── api/                       # FastAPI app; request/response contract in api/CONTRACT.md
+├── web/                       # React app: pages/, components/, charts/, lib/format.ts
+├── tests/                     # pytest suite, including tests/test_api.py
+├── *_app.py, app.py           # legacy Streamlit interface (kept as a reference)
+├── docs/screenshots/
+├── AGENTS.md                  # conventions, invariants and roadmap for contributors
+└── Makefile
 ```
 
 ---
 
-# Core Modules
+## Technology
 
-## `backtester.py`
-
-Handles:
-
-- Historical data preparation
-- Daily returns
-- Signal-to-position timing
-- Long-only exposure
-- Transaction costs
-- Strategy returns
-- Buy and Hold benchmark
-- Equity curves
-- Drawdowns
-
-## `metrics.py`
-
-Calculates:
-
-- Total return
-- CAGR
-- Annualized volatility
-- Sharpe ratio
-- Maximum drawdown
-
-## `comparison.py`
-
-Runs registered strategies under common assumptions and builds cross-strategy rankings.
-
-## `optimization.py`
-
-Provides:
-
-- Parameter-grid optimization
-- Multiple objectives
-- Optimization gain calculations
-- Coarse-to-fine refinement
-- Parameter sensitivity analysis
-- Robustness diagnostics
-- Stability-oriented candidate selection
-
-## `validation.py`
-
-Provides:
-
-- Strict chronological train/test validation
-- Frozen-parameter evaluation
-- Out-of-sample degradation analysis
-- Expanding walk-forward validation
-- Rolling walk-forward validation
-- Parameter history
-- Fold-level evidence
-- Continuous stitched out-of-sample equity analysis
-
-## `strategies/__init__.py`
-
-Acts as the central strategy registry.
-
-It connects:
-
-- Strategy implementations
-- Default parameters
-- Strategy metadata
-- Parameter specifications
-- Predefined optimization grids
-
-This registry-driven structure allows the research pages to work across strategies without requiring separate application logic for every implementation.
+| Layer | Stack |
+|---|---|
+| Research engine | Python 3.13, pandas, NumPy, statsmodels, SciPy |
+| API | FastAPI, Pydantic v2 (OpenAPI docs at `/docs`) |
+| Frontend | React 19, TypeScript 6, Vite 8, Tailwind CSS v4, TanStack Query, React Router |
+| Charts | Apache ECharts 6 with a palette validated for light and dark themes |
+| Market data | yfinance (cached in-process per ticker and date range) |
+| Quality | pytest, vitest, oxlint, Prettier, Playwright |
+| Legacy UI | Streamlit + Plotly |
 
 ---
 
-# Technology Stack
+## Getting started
 
-The project is built primarily with:
-
-- **Python**
-- **Streamlit**
-- **pandas**
-- **NumPy**
-- **Plotly**
-- **yfinance**
-- **pytest**
-
----
-
-# Installation
-
-Clone the repository:
+Requirements: **Python 3.12–3.13** and **Node 20+**.
 
 ```bash
 git clone https://github.com/enesozs/Quant-Strategy-Research-Platform.git
-
 cd Quant-Strategy-Research-Platform
+
+make install   # .venv with the Python requirements, then the web app's npm packages
+make dev       # API on :8020 (auto-reload) + web app on :5190
 ```
 
-Create a virtual environment:
+Open **http://localhost:5190**, and press **Ctrl+C** to stop both servers. The ports differ from
+the other QuantProjects (8000/5173, 8010/5180), so they can all run side by side.
+
+| Command | What it does |
+|---|---|
+| `make serve` | Build the UI and serve everything from FastAPI on http://localhost:8020 |
+| `make test` | Python and frontend unit tests (offline) |
+| `make lint` | Ruff on the API and its tests |
+| `make build` | Production build of the frontend into `web/dist` |
+| `make streamlit` | The legacy Streamlit interface |
+
+The first run of a ticker downloads its history from Yahoo Finance, which needs internet access.
+Repeat runs are served from the cache.
+
+---
+
+## Deployment
+
+The web app runs as **one container**: the React build served by the FastAPI API.
 
 ```bash
-python -m venv .venv
+docker build -t strategy-lab .
+docker run -p 8020:8020 strategy-lab      # http://localhost:8020
 ```
 
-Activate it on macOS/Linux:
-
-```bash
-source .venv/bin/activate
-```
-
-On Windows:
-
-```powershell
-.venv\Scripts\activate
-```
-
-Install dependencies:
-
-```bash
-pip install -r requirements.txt
-```
-
-Run the application:
-
-```bash
-python -m streamlit run app.py
-```
+`render.yaml` deploys it on [Render](https://render.com) as a Docker web service (New →
+Blueprint → this repository), with a health check on `/api/health` and automatic deploys on
+every push. The image installs only the web app's dependencies (`requirements-api.txt`) and
+listens on `$PORT`.
 
 ---
 
-# Testing
+## API
 
-Run the complete automated test suite with:
+Eleven JSON endpoints under `/api`. Interactive documentation is at
+**http://localhost:8020/docs**, and the request/response shapes are specified in
+[`api/CONTRACT.md`](api/CONTRACT.md).
 
-```bash
-python -m pytest
-```
-
-The test suite covers areas including:
-
-- Signal validity
-- Strategy registry behavior
-- Strategy metadata completeness
-- Look-ahead protection
-- Position timing
-- Transaction costs
-- Fractional exposure
-- Equity compounding
-- Performance metrics
-- Optimization direction
-- Invalid parameter combinations
-- Coarse-to-fine refinement
-- Optimization robustness
-- Strict train/test separation
-- Frozen optimized parameters
-- Expanding walk-forward validation
-- Rolling walk-forward validation
-- Stitched out-of-sample behavior
-
-At the time of the initial repository release, the project passes **192 automated tests**.
+| Endpoint | Purpose |
+|---|---|
+| `GET /health` · `GET /meta` | Status · strategies, parameters, grids, objectives, pairs methods, universe presets |
+| `POST /backtest` | One strategy: metrics, equity, drawdown, indicators |
+| `POST /compare` | Every strategy under common assumptions, with rankings |
+| `POST /optimize` | Grid or coarse-to-fine search, robustness, heatmap, profiles, deflated Sharpe |
+| `POST /validate/split` · `/validate/walk-forward` | Out-of-sample validation |
+| `POST /pairs/research` · `/pairs/sensitivity` | One pair under a spread model · local parameter sensitivity |
+| `POST /pairs/discover` · `/pairs/portfolio` | Universe ranking · out-of-sample multi-pair portfolio |
 
 ---
 
-# Research Assumptions and Limitations
+## Adding a strategy
 
-This platform intentionally uses a simplified research model.
+1. **Implement it** in `strategies/my_strategy.py` as a function that takes the price DataFrame
+   and parameters and adds a `signal` column (0 = cash, 1 = long). It can optionally add a
+   `target_position` column for fractional exposure.
+2. **Register it** in `strategies/__init__.py` with its metadata (family, thesis, environments,
+   risks, parameter specs) and a predefined optimization grid. Integer parameters are window
+   lengths; the burn-in relies on that.
+3. **Run `make test`.** The suite checks registry integrity, metadata completeness and
+   backtester compatibility.
 
-Important limitations include:
-
-## Historical performance
-
-Historical performance does not guarantee future performance.
-
-A successful backtest demonstrates what would have happened under the modeled assumptions, not what will happen in the future.
-
-## Data source
-
-Historical market data is obtained through `yfinance`.
-
-Data availability, adjustments, corrections, and upstream provider behavior are outside the control of this project.
-
-## Cash returns
-
-Uninvested capital is assumed to earn zero return.
-
-The selected risk-free rate is used for Sharpe-ratio calculations but is not credited to cash balances.
-
-## Transaction costs
-
-Transaction costs are modeled as proportional one-way costs on changes in exposure.
-
-The model does not explicitly simulate:
-
-- Bid/ask spreads
-- Market impact
-- Order-book liquidity
-- Variable commissions
-- Execution latency
-
-## Leverage
-
-Where a strategy permits exposure above 100%, the additional exposure represents simplified leverage.
-
-Financing costs, borrowing constraints, margin requirements, and liquidation mechanics are not modeled.
-
-## Short selling
-
-The current backtester is long-only and does not support negative portfolio exposure.
-
-## Optimization
-
-Historical optimization can overfit.
-
-The raw optimum should not be interpreted as the universally best parameter configuration.
-
-## Robustness diagnostics
-
-Broad-plateau, moderate-plateau, narrow-peak, neighborhood, and stability-oriented diagnostics are descriptive research heuristics.
-
-They are not statistical guarantees against overfitting.
-
-## Out-of-sample validation
-
-Out-of-sample testing reduces direct parameter-selection bias because test observations are not used to choose the evaluated parameters.
-
-However, researchers can still introduce bias through repeated experimentation, strategy selection, universe selection, date selection, and interpretation.
-
-## Walk-forward validation
-
-Walk-forward analysis provides repeated unseen historical tests and is more demanding than a single optimized backtest.
-
-It still cannot establish future profitability.
-
-## Portfolio scope
-
-The current project focuses on researching one underlying asset at a time.
-
-It is not a multi-asset portfolio-construction or portfolio-optimization engine.
-
-## Execution
-
-The application does not connect to a broker and does not execute trades.
+The web app picks the strategy up automatically: forms, the Guide, Compare, Optimize and Validate
+are all generated from the registry.
 
 ---
 
-# Intended Use
+## Assumptions
 
-This project is intended for:
-
-- Quantitative strategy research
-- Historical experimentation
-- Studying systematic trading concepts
-- Parameter sensitivity analysis
-- Learning about overfitting
-- Comparing systematic approaches
-- Practicing out-of-sample validation
-- Exploring walk-forward methodology
-- Extending the framework with new strategy ideas
-
-It is **not intended to provide personalized investment advice or live trading recommendations**.
+- **Execution:** daily closing prices with next-day execution and proportional costs; cash,
+  financing and borrow rates are constant over each backtest.
+- **Data:** adjusted daily prices from Yahoo Finance; ticker universes and pair presets are
+  chosen by the user.
+- **Scope:** single-asset strategies trade one asset at a time and pairs trade two legs per
+  pair; multi-asset rotation is on the roadmap in [AGENTS.md](AGENTS.md).
+- **Robustness labels** (plateau, peak, robust candidate) describe the optimization surface, and
+  every result is a historical simulation rather than a prediction.
 
 ---
 
-# Design Philosophy
+## Legacy interface
 
-The project intentionally prioritizes:
+The original Streamlit interface (`app.py` and the `*_app.py` pages) is kept as a reference and
+still runs with `make streamlit`. New features land in the web app only.
 
-**Transparency over black-box complexity**
+## License
 
-Strategy rules and parameter choices should be inspectable.
-
-**Research workflow over headline backtest performance**
-
-Optimization is treated as an intermediate step rather than the final answer.
-
-**Validation over parameter chasing**
-
-Unseen historical data is used to challenge conclusions formed during optimization.
-
-**Interpretability over strategy count**
-
-A curated set of understandable strategies is preferred to a large catalog of minor variations.
-
-**Extensibility over exhaustiveness**
-
-The included strategies demonstrate the framework; users can add their own research rules without redesigning the entire application.
-
-**Honest limitations over unrealistic precision**
-
-The platform explicitly documents assumptions that are not modeled rather than implying that a historical simulation is equivalent to real-world execution.
-
----
-
-# Future Extensions
-
-The current feature set is intentionally focused on strategy-level research.
-
-Possible future extensions could include:
-
-- Additional user-defined strategy families
-- More advanced transaction-cost models
-- Alternative market-data providers
-- Additional out-of-sample research techniques
-- Multi-asset research
-- Portfolio-level analysis
-- Short-selling support
-- Financing-cost modeling
-
-These are deliberately treated as extensions rather than requirements for the current research platform.
-
----
-
-# Disclaimer
-
-This software is provided for educational and research purposes only.
-
-Nothing in this repository or application constitutes financial, investment, trading, legal, or tax advice.
-
-Historical simulations, optimized parameters, robustness diagnostics, and out-of-sample results do not guarantee future performance.
-
-Any use of the software or its outputs for real-world financial decisions is entirely at the user's own risk.
+[MIT](LICENSE)

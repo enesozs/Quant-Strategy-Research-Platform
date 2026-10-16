@@ -443,3 +443,37 @@ def test_run_backtest_does_not_modify_original_data() -> None:
         data,
         original,
     )
+
+def test_idle_cash_earns_the_cash_rate() -> None:
+    index = pd.date_range("2026-01-01", periods=3, freq="D")
+    data = pd.DataFrame(
+        {"asset_return": [float("nan"), 0.01, 0.01], "signal": [0, 0, 0]},
+        index=index,
+    )
+
+    result = run_backtest(data, transaction_cost_bps=0, cash_rate=0.05)
+
+    daily = 1.05 ** (1 / 252) - 1
+    assert result["strategy_equity"].iloc[0] == pytest.approx(10_000)
+    assert result["strategy_return"].iloc[1] == pytest.approx(daily)
+
+
+def test_leverage_pays_cash_rate_plus_financing_spread() -> None:
+    index = pd.date_range("2026-01-01", periods=3, freq="D")
+    data = pd.DataFrame(
+        {
+            "asset_return": [float("nan"), 0.0, 0.0],
+            "target_position": [1.5, 1.5, 1.5],
+        },
+        index=index,
+    )
+
+    result = run_backtest(
+        data,
+        transaction_cost_bps=0,
+        cash_rate=0.03,
+        financing_spread=0.01,
+    )
+
+    borrow = 1.04 ** (1 / 252) - 1
+    assert result["gross_strategy_return"].iloc[1] == pytest.approx(-0.5 * borrow)

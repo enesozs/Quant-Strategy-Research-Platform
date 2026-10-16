@@ -387,3 +387,17 @@ def test_strategy_subtypes_are_consistently_named() -> None:
     assert len(unique_original) == len(
         unique_normalized
     )
+
+def test_partial_parameters_are_merged_with_defaults() -> None:
+    from strategies import apply_strategy
+
+    data = create_market_data()
+
+    partial = apply_strategy(data, "rsi", {"window": 10})
+    explicit = apply_strategy(
+        data,
+        "rsi",
+        {"window": 10, "entry_threshold": 30, "exit_threshold": 55},
+    )
+
+    pd.testing.assert_series_equal(partial["signal"], explicit["signal"])
