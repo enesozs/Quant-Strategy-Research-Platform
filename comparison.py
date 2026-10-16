@@ -92,6 +92,7 @@ def compare_all_strategies(
     end_date: str,
     initial_capital: float = 10_000,
     transaction_cost_bps: float = 10,
+    cash_rate: float = 0.0,
     risk_free_rate: float = 0.0,
     use_optimized_parameters: bool = False,
     optimization_objective: OptimizationObjective = "sharpe_ratio",
@@ -143,6 +144,7 @@ def compare_all_strategies(
                 objective=optimization_objective,
                 initial_capital=initial_capital,
                 transaction_cost_bps=transaction_cost_bps,
+                cash_rate=cash_rate,
                 risk_free_rate=risk_free_rate,
             )
 
@@ -180,6 +182,7 @@ def compare_all_strategies(
             strategy_parameters=parameters,
             initial_capital=initial_capital,
             transaction_cost_bps=transaction_cost_bps,
+            cash_rate=cash_rate,
         )
 
         metrics = calculate_performance_metrics(
@@ -232,6 +235,7 @@ def compare_all_strategies(
                 ],
                 "sharpe_ratio": metrics["sharpe_ratio"],
                 "max_drawdown": metrics["max_drawdown"],
+                "calmar_ratio": metrics["calmar_ratio"],
                 "trades": number_of_position_changes,
                 "turnover": total_turnover,
                 "average_exposure": average_exposure,
@@ -283,6 +287,7 @@ def compare_all_strategies(
             ],
             "sharpe_ratio": benchmark_metrics["sharpe_ratio"],
             "max_drawdown": benchmark_metrics["max_drawdown"],
+            "calmar_ratio": benchmark_metrics["calmar_ratio"],
             "trades": benchmark_rebalancing_days,
             "turnover": benchmark_turnover,
             "average_exposure": 1.0,
@@ -317,31 +322,22 @@ def add_strategy_rankings(
     """Add rankings for return, risk-adjusted return, volatility, and drawdown."""
     result = summary.copy()
 
-    result["return_rank"] = (
-        result["total_return"]
-        .rank(method="min", ascending=False)
-        .astype(int)
-    )
-    result["cagr_rank"] = (
-        result["cagr"]
-        .rank(method="min", ascending=False)
-        .astype(int)
-    )
-    result["sharpe_rank"] = (
-        result["sharpe_ratio"]
-        .rank(method="min", ascending=False)
-        .astype(int)
-    )
-    result["volatility_rank"] = (
-        result["annualized_volatility"]
-        .rank(method="min", ascending=True)
-        .astype(int)
-    )
-    result["drawdown_rank"] = (
-        result["max_drawdown"]
-        .rank(method="min", ascending=False)
-        .astype(int)
-    )
+    rank_specifications = {
+        "return_rank": ("total_return", False),
+        "cagr_rank": ("cagr", False),
+        "sharpe_rank": ("sharpe_ratio", False),
+        "volatility_rank": ("annualized_volatility", True),
+        "drawdown_rank": ("max_drawdown", False),
+    }
+
+    # A strategy that never trades has an undefined Sharpe ratio. It is ranked
+    # last instead of crashing the integer conversion.
+    for rank_column, (metric, ascending) in rank_specifications.items():
+        result[rank_column] = (
+            pd.to_numeric(result[metric], errors="coerce")
+            .rank(method="min", ascending=ascending, na_option="bottom")
+            .astype(int)
+        )
 
     return result
 

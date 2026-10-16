@@ -193,7 +193,7 @@ def render_comparison_page() -> None:
 
                 st.dataframe(
                     workload_rows,
-                    use_container_width=True,
+                    width="stretch",
                     hide_index=True,
                 )
 
@@ -206,7 +206,7 @@ def render_comparison_page() -> None:
         run_button = st.button(
             "Compare strategies",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="comparison_run",
         )
 
@@ -480,7 +480,7 @@ def render_comparison_page() -> None:
 
     st.dataframe(
         display_summary.style.format(display_formatters),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -519,7 +519,7 @@ def render_comparison_page() -> None:
 
     st.plotly_chart(
         risk_return_figure,
-        use_container_width=True,
+        width="stretch",
     )
 
     st.subheader("Time-series comparison")
@@ -636,7 +636,7 @@ def render_comparison_page() -> None:
 
         st.plotly_chart(
             equity_figure,
-            use_container_width=True,
+            width="stretch",
         )
 
         st.subheader("Selected drawdown comparison")
@@ -693,7 +693,7 @@ def render_comparison_page() -> None:
 
         st.plotly_chart(
             drawdown_figure,
-            use_container_width=True,
+            width="stretch",
         )
 
 
@@ -737,7 +737,7 @@ def render_comparison_page() -> None:
 
     st.plotly_chart(
         drawdown_bar_figure,
-        use_container_width=True,
+        width="stretch",
     )
 
     st.caption("Comparison view: selected curves, maximum-drawdown ranking, and drawdown deep dive.")
@@ -813,7 +813,7 @@ def render_comparison_page() -> None:
 
     st.plotly_chart(
         focused_drawdown_figure,
-        use_container_width=True,
+        width="stretch",
     )
 
     focused_max_drawdown = float(

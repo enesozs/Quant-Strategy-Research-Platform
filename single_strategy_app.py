@@ -563,12 +563,18 @@ def render_single_strategy_page() -> None:
         run_button = st.button(
             "Run backtest",
             type="primary",
-            use_container_width=True,
+            width="stretch",
             key="single_run",
         )
 
 
-    if not run_button:
+    # Streamlit reruns the page on every widget change. Remember that a run
+    # was requested so results stay on screen (and follow the controls)
+    # instead of disappearing until the button is pressed again.
+    if run_button:
+        st.session_state["single_has_run"] = True
+
+    if not st.session_state.get("single_has_run", False):
         st.info("Choose the settings and click **Run backtest**.")
         st.stop()
 
@@ -1063,7 +1069,7 @@ def render_single_strategy_page() -> None:
 
     st.plotly_chart(
         price_figure,
-        use_container_width=True,
+        width="stretch",
     )
 
     equity_figure = go.Figure()
@@ -1077,7 +1083,7 @@ def render_single_strategy_page() -> None:
     if indicator_figure is not None:
         st.plotly_chart(
             indicator_figure,
-            use_container_width=True,
+            width="stretch",
         )
 
     equity_figure.add_trace(
@@ -1105,7 +1111,7 @@ def render_single_strategy_page() -> None:
 
     st.plotly_chart(
         equity_figure,
-        use_container_width=True,
+        width="stretch",
     )
 
 
@@ -1137,7 +1143,7 @@ def render_single_strategy_page() -> None:
 
     st.plotly_chart(
         drawdown_figure,
-        use_container_width=True,
+        width="stretch",
     )
 
     comparison_data = {
@@ -1167,6 +1173,6 @@ def render_single_strategy_page() -> None:
     st.subheader("Performance comparison")
     st.dataframe(
         comparison_data,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )

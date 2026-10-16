@@ -1,3 +1,4 @@
+import numpy as np
 import pandas as pd
 
 from comparison import (
@@ -87,3 +88,18 @@ def test_get_comparison_leaders() -> None:
 
     assert leaders["most_active"] == "Strategy C"
     assert leaders["least_active"] == "Strategy A"
+
+def test_rankings_tolerate_undefined_sharpe_ratio() -> None:
+    summary = pd.DataFrame(
+        {
+            "total_return": [0.0, 0.2],
+            "cagr": [0.0, 0.1],
+            "sharpe_ratio": [np.nan, 1.0],
+            "annualized_volatility": [0.0, 0.2],
+            "max_drawdown": [0.0, -0.1],
+        }
+    )
+
+    ranked = add_strategy_rankings(summary)
+
+    assert ranked["sharpe_rank"].tolist() == [2, 1]

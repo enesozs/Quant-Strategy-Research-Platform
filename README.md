@@ -332,6 +332,39 @@ Repeated out-of-sample success is stronger evidence than a single optimized hist
 
 ---
 
+# Pairs Trading Lab
+
+The Pairs Trading Lab researches market-neutral relative-value trades between two assets. When the spread between them diverges, the strategy buys the cheap leg, shorts the rich leg, and waits for convergence.
+
+Three spread models are available:
+
+- **Distance (Gatev-style).** Prices are normalized to the start of each formation window. Trades are taken when their difference moves beyond a z-score threshold computed in formation. A relationship-break filter exits when the recent spread volatility, mean, or return correlation departs from formation behavior.
+- **Cointegration walk-forward.** Each formation window fits `log(A) = α + β·log(B)` by OLS and runs an Engle–Granger test. It also checks the half-life and the number of mean crossings. By default, only qualified windows trade, with the hedge ratio frozen for the following trading window.
+- **Dynamic Kalman hedge ratio.** α and β follow random walks tracked by a Kalman filter. The regressor is centered for numerical conditioning. Each innovation is z-scored against the trailing volatility of past innovations, so a z-score of 2 means two realized standard deviations.
+
+All three models share the same rules:
+
+- Entry, exit, stop and time-stop rules, with a cooldown after stops.
+- No entry when the deviation is already beyond the stop.
+- Next-day execution.
+- Proportional costs on both legs.
+- A trade log with per-trade exit reasons.
+
+**Pairs portfolio.** One pair's result is mostly the luck of that pair. The portfolio mode tests the selection process instead:
+
+1. Rank a universe on the opening formation window.
+2. Take the top N pairs.
+3. Trade each pair strictly after that window.
+4. Combine them with equal weights.
+
+Universe presets (beverages, oil majors, banks, payments, country and sector ETFs, precious metals) provide sensible starting universes. A local parameter-sensitivity search is available in `pairs_trading_sensitivity.py`; it is in-sample by construction.
+
+Pair discovery ranks a candidate universe on the **opening formation window only**, so later trading periods remain out of sample for the selection step. Cointegration discovery also reports a Bonferroni-adjusted p-value: with dozens of candidate pairs, several will look cointegrated at 10% by chance alone.
+
+Pairs trading in liquid large caps is heavily arbitraged. Expect small, unstable edges that are sensitive to costs.
+
+---
+
 # Strategy Guide
 
 The Strategy Guide documents the ideas represented by the platform rather than treating strategies as black boxes.
@@ -647,6 +680,19 @@ Annualized risk-adjusted return relative to the selected annual risk-free rate.
 
 Largest historical peak-to-trough decline in portfolio equity.
 
+## Calmar Ratio
+
+CAGR divided by the magnitude of the maximum drawdown. It is undefined (shown as N/A) when there was no drawdown. Calmar is also an optimization objective. Unlike minimizing drawdown or volatility, it does not reward a strategy for simply staying in cash.
+
+## Probabilistic and Deflated Sharpe Ratio
+
+Every optimization reports two probabilities for the raw optimum (Bailey and López de Prado):
+
+- **Probabilistic Sharpe ratio:** the probability that its true Sharpe ratio is above zero, given the sample length, skewness, and kurtosis of its returns.
+- **Deflated Sharpe ratio:** the same probability, measured against the best Sharpe you would expect from the same number of skill-less trials.
+
+Grid trials are correlated, so the deflated value is conservative. A low deflated Sharpe ratio means the optimum is hard to distinguish from the best of many lucky draws.
+
 ## Rebalancing Days
 
 Number of trading observations on which portfolio exposure changes.
@@ -681,6 +727,12 @@ Lower values are preferred for:
 - Annualized volatility
 
 Optimization results are historical and in-sample unless they are subsequently evaluated through the Validation Lab.
+
+## Common Burn-In
+
+Every candidate in a grid is scored over the same dates. Scoring starts after the longest lookback in the grid; earlier observations are used only to warm up indicators.
+
+Without this, a 200-day moving average would spend its first 200 days in cash while a 20-day one was already trading. Long lookbacks would then be penalized under return and Sharpe objectives and rewarded under drawdown and volatility objectives, purely because of their warmup period. Validation training metrics use the same scored window as the optimizer.
 
 ---
 
@@ -765,12 +817,18 @@ Quant-Strategy-Research-Platform/
 ├── comparison.py
 ├── optimization.py
 ├── validation.py
-├── plots.py
+│
+├── pairs_trading_core.py
+├── pairs_trading_distance.py
+├── pairs_trading_cointegration.py
+├── pairs_trading_dynamic.py
+├── pairs_trading_discovery.py
 │
 ├── comparison_app.py
 ├── single_strategy_app.py
 ├── optimization_app.py
 ├── validation_app.py
+├── pairs_trading_app.py
 ├── strategy_guide_app.py
 │
 ├── run_optimization.py
@@ -778,7 +836,7 @@ Quant-Strategy-Research-Platform/
 ├── strategies/
 │   ├── __init__.py
 │   ├── moving_average.py
-│   ├── ema_crossover.py
+│   ├── ema.py
 │   ├── rsi.py
 │   ├── bollinger.py
 │   ├── stochastic.py
@@ -789,7 +847,7 @@ Quant-Strategy-Research-Platform/
 │   ├── adx.py
 │   ├── cci.py
 │   ├── keltner.py
-│   ├── volatility_filter.py
+│   ├── regime_filtered_trend.py
 │   ├── multi_timeframe_trend.py
 │   └── volatility_targeted_momentum.py
 │
@@ -799,6 +857,7 @@ Quant-Strategy-Research-Platform/
 │   ├── test_metrics.py
 │   ├── test_optimization.py
 │   ├── test_optimization_robustness.py
+│   ├── test_pairs_trading.py
 │   ├── test_strategies.py
 │   ├── test_strategy_guide_metadata.py
 │   └── test_validation.py
@@ -811,6 +870,10 @@ Quant-Strategy-Research-Platform/
 │   ├── validation-walk-forward-overview.png
 │   └── validation-walk-forward-stability.png
 │
+├── api/                 # FastAPI backend (see api/CONTRACT.md)
+├── web/                 # React frontend
+├── Makefile
+├── AGENTS.md
 ├── LICENSE
 ├── requirements.txt
 ├── .gitignore
@@ -895,9 +958,11 @@ This registry-driven structure allows the research pages to work across strategi
 The project is built primarily with:
 
 - **Python**
-- **Streamlit**
+- **FastAPI** (web API) and **React + TypeScript + Vite + Tailwind + ECharts** (web UI)
+- **Streamlit** (original interface)
 - **pandas**
 - **NumPy**
+- **statsmodels** (cointegration tests)
 - **Plotly**
 - **yfinance**
 - **pytest**
@@ -938,10 +1003,19 @@ Install dependencies:
 pip install -r requirements.txt
 ```
 
-Run the application:
+Run the application. The web app (FastAPI + React) is the primary interface:
 
 ```bash
-python -m streamlit run app.py
+make install   # Python requirements + web dependencies
+make dev       # API on http://localhost:8020, UI on http://localhost:5190
+make serve     # single process: built UI + API on http://localhost:8020
+make test      # Python and web unit tests
+```
+
+The original Streamlit interface is kept as a reference and still works:
+
+```bash
+make streamlit  # or: python -m streamlit run app.py
 ```
 
 ---
@@ -975,7 +1049,7 @@ The test suite covers areas including:
 - Rolling walk-forward validation
 - Stitched out-of-sample behavior
 
-At the time of the initial repository release, the project passes **192 automated tests**.
+The pairs-trading tests additionally cover stateful entry/exit rules, trade attribution, Kalman z-score calibration, and look-ahead-free pair discovery.
 
 ---
 
@@ -999,9 +1073,11 @@ Data availability, adjustments, corrections, and upstream provider behavior are 
 
 ## Cash returns
 
-Uninvested capital is assumed to earn zero return.
+The backtester accepts a separate annual cash rate. Uninvested capital earns it; exposure above 100% is borrowed at the cash rate plus a financing spread (1% by default).
 
-The selected risk-free rate is used for Sharpe-ratio calculations but is not credited to cash balances.
+Interest is part of the gross return, so the walk-forward stitching and cost model are unchanged. The core functions default to a 0% cash rate. The web app credits cash with the risk-free rate unless you switch that off.
+
+A constant rate is a simplification: real short-term rates were near zero for much of 2010–2021.
 
 ## Transaction costs
 
@@ -1017,13 +1093,17 @@ The model does not explicitly simulate:
 
 ## Leverage
 
-Where a strategy permits exposure above 100%, the additional exposure represents simplified leverage.
+Where a strategy permits exposure above 100%, the borrowed portion pays the cash rate plus a financing spread.
 
-Financing costs, borrowing constraints, margin requirements, and liquidation mechanics are not modeled.
+Borrowing constraints, margin requirements, and liquidation mechanics are not modeled.
 
 ## Short selling
 
-The current backtester is long-only and does not support negative portfolio exposure.
+The single-asset backtester is long-only and does not support negative portfolio exposure.
+
+The Pairs Trading Lab is the exception: it holds a long and a short leg, and gross exposure is capped at 100% of capital.
+
+Capital not used to buy the long leg earns the cash rate. The short leg pays a configurable annual borrow fee. Short proceeds are treated as posted collateral that earns nothing. Margin requirements are not modeled.
 
 ## Optimization
 

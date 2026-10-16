@@ -1,5 +1,3 @@
-from comparison import compare_all_strategies
-
 from comparison import (
     compare_all_strategies,
     get_comparison_leaders,

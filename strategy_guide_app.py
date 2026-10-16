@@ -175,7 +175,7 @@ def render_strategy_guide_page() -> None:
 
     st.dataframe(
         catalog_table,
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
@@ -237,7 +237,7 @@ def render_strategy_guide_page() -> None:
     st.subheader("Parameters")
     st.dataframe(
         _build_parameter_table(metadata),
-        use_container_width=True,
+        width="stretch",
         hide_index=True,
     )
 
